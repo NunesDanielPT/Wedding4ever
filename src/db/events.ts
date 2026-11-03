@@ -3,6 +3,7 @@ import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "../config";
+import { resolveDesign, type Design } from "../lib/design";
 import { central } from "./central";
 import { migrate } from "./migrate";
 
@@ -21,6 +22,8 @@ export interface EventRecord {
   db_name: string;
   schema_version: number;
   migration_error: string | null;
+  design: unknown;
+  has_couple_code: boolean;
 }
 
 export interface NewEvent {
@@ -43,7 +46,8 @@ export const DEFAULT_MISSIONS = [
 
 const SELECT_EVENT = central`
   id, slug, partner_one, partner_two, event_date::text AS event_date, venue,
-  couple_email, status, db_name, schema_version, migration_error
+  couple_email, status, db_name, schema_version, migration_error, design,
+  couple_code_hash IS NOT NULL AS has_couple_code
 `;
 const DB_NAME = /^evt_[0-9a-f]{16}$/;
 const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -171,6 +175,29 @@ export async function getEventBySlug(slug: string): Promise<EventRecord | undefi
 
 export async function setEventStatus(id: string, status: EventStatus): Promise<void> {
   await central`UPDATE events SET status = ${status}, updated_at = now() WHERE id = ${id}::uuid`;
+}
+
+export function eventDesign(event: EventRecord): Design {
+  return resolveDesign(event.design);
+}
+
+export async function saveEventDesign(id: string, design: Design): Promise<void> {
+  await central`
+    UPDATE events SET design = ${JSON.stringify(design)}::text::jsonb, updated_at = now() WHERE id = ${id}::uuid
+  `;
+}
+
+export interface Mission {
+  id: string;
+  title: string;
+  position: number;
+  photo_limit: number;
+}
+
+export async function listMissions(dbName: string): Promise<Mission[]> {
+  return eventDb(dbName)`
+    SELECT id, title, position, photo_limit FROM missions WHERE active ORDER BY position
+  `;
 }
 
 export async function deleteEvent(event: EventRecord): Promise<void> {

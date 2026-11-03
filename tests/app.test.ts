@@ -125,7 +125,7 @@ describe("criação de clientes", () => {
   test("cria base, missões, link, QR Code e PDF", async () => {
     const event = await createClient();
     expect(event.slug).toMatch(/^joao-ines-[a-z2-9]{6}$/);
-    expect(event.schema_version).toBe(1);
+    expect(event.schema_version).toBe(2);
     expect(event.status).toBe("rascunho");
     expect(await events.getEventStats(event.db_name)).toEqual({ missions: 7, guests: 0, photos: 0 });
 
@@ -137,7 +137,9 @@ describe("criação de clientes", () => {
 
     const guest = await get(`/e/${event.slug}`, false);
     expect(guest.status).toBe(200);
-    expect(await guest.text()).toContain("João &amp; Inês");
+    const guestBody = await guest.text();
+    expect(guestBody).toContain("João &amp; Inês");
+    expect(guestBody).toContain('name="email"');
   });
 
   test("escapa conteúdo introduzido nos nomes", async () => {
@@ -187,7 +189,7 @@ describe("ciclo de vida", () => {
     const event = await createClient();
     await events.migrateAllEvents();
     const after = (await events.getEventById(event.id))!;
-    expect(after.schema_version).toBe(1);
+    expect(after.schema_version).toBe(2);
     expect(after.migration_error).toBeNull();
     expect((await events.getEventStats(event.db_name)).missions).toBe(7);
   });
@@ -202,5 +204,103 @@ describe("ciclo de vida", () => {
     expect(await events.getEventById(event.id)).toBeUndefined();
     expect((await maintenance`SELECT 1 FROM pg_database WHERE datname = ${event.db_name}`).length).toBe(0);
     expect((await maintenance`SELECT 1 FROM pg_roles WHERE rolname = ${event.db_name}`).length).toBe(0);
+  });
+});
+
+const PNG_1X1 = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+
+function postMultipart(path: string, form: FormData) {
+  return handle(new Request(`${ORIGIN}${path}`, { method: "POST", body: form, headers: { Origin: ORIGIN, Cookie: cookie } }));
+}
+
+function designForm(overrides: Record<string, string> = {}) {
+  const form = new FormData();
+  const values = {
+    headline: "A nossa batalha", instructions: "Lê o código", backgroundColor: "#FFFFFF", textColor: "#222222",
+    accentColor: "#556B2F", qrColor: "#000000", qrBackground: "#FFFFFF", ...overrides,
+  };
+  for (const [key, value] of Object.entries(values)) form.set(key, value);
+  return form;
+}
+
+function cookieOf(response: Response): string {
+  return response.headers.get("set-cookie")!.split(";")[0]!;
+}
+
+describe("personalização", () => {
+  test("guarda cores, textos e imagens e usa-os nas saídas", async () => {
+    const event = await createClient();
+    const form = designForm();
+    form.set("backgroundFile", new File([PNG_1X1], "fundo.png", { type: "image/png" }));
+    const saved = await postMultipart(`/admin/clientes/${event.id}/personalizar`, form);
+    expect(saved.status).toBe(303);
+
+    const theme = await (await get(`/e/${event.slug}/tema.css`, false)).text();
+    expect(theme).toContain("--t-accent:#556B2F");
+    expect(theme).toContain("media/background");
+    expect((await get(`/e/${event.slug}/media/background`, false)).headers.get("content-type")).toBe("image/png");
+    expect(await (await get(`/admin/clientes/${event.id}/qr.svg`)).text()).toContain('fill="#000000"');
+
+    const pdf = new TextDecoder("latin1").decode(await (await get(`/admin/clientes/${event.id}/cartoes.pdf`)).arrayBuffer());
+    expect(pdf).toContain("/Subtype /Image");
+    const png = new Uint8Array(await (await get(`/admin/clientes/${event.id}/qr.png`)).arrayBuffer());
+    expect([...png.slice(1, 4)]).toEqual([0x50, 0x4e, 0x47]);
+  });
+
+  test("recusa um QR Code ilegível e ficheiros que não são imagens", async () => {
+    const event = await createClient();
+    expect((await postMultipart(`/admin/clientes/${event.id}/personalizar`, designForm({ qrColor: "#FFFFFF", qrBackground: "#000000" }))).status).toBe(422);
+    const form = designForm();
+    form.set("logoFile", new File(["<script>"], "logo.png", { type: "image/png" }));
+    expect((await postMultipart(`/admin/clientes/${event.id}/personalizar`, form)).status).toBe(422);
+  });
+});
+
+describe("convidados", () => {
+  test("exige nome e e-mail e mantém a sessão no regresso", async () => {
+    const event = await createClient();
+    await events.setEventStatus(event.id, "aberto");
+    expect((await post(`/e/${event.slug}/entrar`, { name: "", email: "x" })).status).toBe(422);
+
+    const joined = await post(`/e/${event.slug}/entrar`, { name: "Rita Sousa", email: "Rita@Exemplo.pt" }, { Cookie: "" });
+    expect(joined.status).toBe(303);
+    const guestCookie = cookieOf(joined);
+    const home = await handle(new Request(`${ORIGIN}/e/${event.slug}`, { headers: { Cookie: guestCookie } }));
+    const body = await home.text();
+    expect(body).toContain("Olá, Rita Sousa");
+    expect(body).toContain("Na pista de dança");
+
+    await post(`/e/${event.slug}/entrar`, { name: "Outro Nome", email: "rita@exemplo.pt" }, { Cookie: "" });
+    expect((await events.getEventStats(event.db_name)).guests).toBe(1);
+
+    const other = await createClient();
+    const elsewhere = await handle(new Request(`${ORIGIN}/e/${other.slug}`, { headers: { Cookie: guestCookie } }));
+    expect(await elsewhere.text()).toContain('name="email"');
+  });
+});
+
+describe("noivos", () => {
+  test("entram com e-mail e código e controlam a batalha", async () => {
+    const event = await createClient();
+    const generated = await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text();
+    const code = generated.match(/Código de acesso: <strong>([A-Z2-9]{10})</)![1]!;
+    const base = `/e/${event.slug}/noivos`;
+
+    expect((await post(`${base}/estado`, { status: "aberto" }, { Cookie: "" })).status).toBe(401);
+    expect((await post(`${base}/entrar`, { email: "outro@exemplo.pt", code }, { Cookie: "" })).status).toBe(401);
+    const login = await post(`${base}/entrar`, { email: event.couple_email, code: code.toLowerCase() }, { Cookie: "" });
+    expect(login.status).toBe(303);
+    const coupleCookie = cookieOf(login);
+
+    expect((await post(`${base}/estado`, { status: "votacao" }, { Cookie: coupleCookie })).status).toBe(303);
+    expect((await events.getEventById(event.id))!.status).toBe("votacao");
+    expect((await post(`${base}/estado`, { status: "arquivado" }, { Cookie: coupleCookie })).status).toBe(422);
+
+    const download = await handle(new Request(`${ORIGIN}${base}/qr.png`, { headers: { Cookie: coupleCookie } }));
+    expect(download.headers.get("content-type")).toBe("image/png");
+
+    await post(`/admin/clientes/${event.id}/codigo-noivos`, {});
+    const revoked = await handle(new Request(`${ORIGIN}${base}`, { headers: { Cookie: coupleCookie } }));
+    expect(await revoked.text()).toContain("Código de acesso");
   });
 });

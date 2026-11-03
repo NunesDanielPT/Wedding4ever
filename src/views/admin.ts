@@ -1,5 +1,6 @@
-import { config } from "../config";
 import { EVENT_STATUSES, type EventRecord, type EventStats, type EventStatus } from "../db/events";
+import type { Design } from "../lib/design";
+import { eventUrl } from "../lib/event-assets";
 import { coupleNames, formatDate, initial } from "../lib/format";
 import { html, Html } from "../lib/html";
 import { page, rings } from "./layout";
@@ -12,14 +13,14 @@ export const STATUS_LABELS: Record<EventStatus, string> = {
   arquivado: "Arquivado",
 };
 
-function shell(title: string, content: Html): string {
+function shell(title: string, content: Html, stylesheet?: string): string {
   return page(`${title} | Wedding4Ever`, html`
     <header class="topbar">
       <a class="brand" href="/admin">${rings}<span>Wedding4Ever</span></a>
       <form method="post" action="/admin/sair"><button class="link-button">Sair</button></form>
     </header>
     <main class="admin">${content}</main>
-  `);
+  `, "", stylesheet);
 }
 
 export function loginPage(error?: string): string {
@@ -85,8 +86,8 @@ export function newEventPage(values: EventForm = {}, error?: string): string {
   `);
 }
 
-export function eventPage(event: EventRecord, stats: EventStats | null, error?: string): string {
-  const url = `${config.publicUrl}/e/${event.slug}`;
+export function eventPage(event: EventRecord, stats: EventStats | null, error?: string, coupleCode?: string): string {
+  const url = eventUrl(event);
   const couple = coupleNames(event.partner_one, event.partner_two);
   return shell(couple, html`
     <a class="back" href="/admin">Voltar aos clientes</a>
@@ -100,7 +101,9 @@ export function eventPage(event: EventRecord, stats: EventStats | null, error?: 
         <img src="/admin/clientes/${event.id}/qr.svg" alt="QR Code do evento" width="220" height="220">
         <p class="card-actions">
           <a href="/admin/clientes/${event.id}/cartoes.pdf">Descarregar cartões em PDF</a>
-          <a href="/admin/clientes/${event.id}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code</a>
+          <a href="/admin/clientes/${event.id}/qr.png">Descarregar QR Code em PNG</a>
+          <a href="/admin/clientes/${event.id}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
+          <a href="/admin/clientes/${event.id}/personalizar">Personalizar cartões e página</a>
         </p>
       </section>
 
@@ -109,6 +112,16 @@ export function eventPage(event: EventRecord, stats: EventStats | null, error?: 
           <h2>Link dos convidados</h2>
           <input class="copy-field" readonly value="${url}" aria-label="Link dos convidados">
           <a href="${url}" target="_blank" rel="noopener">Abrir como convidado</a>
+        </section>
+
+        <section>
+          <h2>Acesso dos noivos</h2>
+          <input class="copy-field" readonly value="${url}/noivos" aria-label="Link dos noivos">
+          <p>Entram com ${event.couple_email} e um código de acesso.</p>
+          ${coupleCode && html`<p class="notice" role="status">Código de acesso: <strong>${coupleCode}</strong><br>Guarda-o agora. Não volta a ser mostrado.</p>`}
+          <form method="post" action="/admin/clientes/${event.id}/codigo-noivos">
+            <button>${event.has_couple_code || coupleCode ? "Gerar novo código" : "Gerar código de acesso"}</button>
+          </form>
         </section>
 
         <section>
@@ -151,4 +164,61 @@ export function eventPage(event: EventRecord, stats: EventStats | null, error?: 
       </div>
     </div>
   `);
+}
+
+function colorField(label: string, name: string, value: string): Html {
+  return html`<label>${label}<input type="color" name="${name}" value="${value}"></label>`;
+}
+
+export function designPage(event: EventRecord, design: Design, error?: string): string {
+  const couple = coupleNames(event.partner_one, event.partner_two);
+  const mediaBase = `/e/${event.slug}/media`;
+  return shell(`Personalizar ${couple}`, html`
+    <a class="back" href="/admin/clientes/${event.id}">Voltar a ${couple}</a>
+    <h1>Personalizar</h1>
+    <p class="lead">Estas opções mudam os cartões em PDF, o QR Code e a página dos convidados.</p>
+    ${error && html`<p class="error" role="alert">${error}</p>`}
+    <div class="event-layout design-layout">
+      <section class="design-card themed t-image" aria-label="Pré-visualização">
+        ${design.logoImage && html`<img class="design-logo" src="${mediaBase}/logo" alt="">`}
+        <h2>${couple}</h2>
+        <p>${formatDate(event.event_date)}</p>
+        <p class="design-headline">${design.headline}</p>
+        <img class="design-qr" src="/admin/clientes/${event.id}/qr.svg" alt="QR Code do evento" width="200" height="200">
+        <p>${design.instructions}</p>
+      </section>
+
+      <form method="post" action="/admin/clientes/${event.id}/personalizar" enctype="multipart/form-data" class="stack">
+        <label>Título<input name="headline" maxlength="60" required value="${design.headline}"></label>
+        <label>Instrução para os convidados<input name="instructions" maxlength="120" required value="${design.instructions}"></label>
+
+        <fieldset>
+          <legend>Cores</legend>
+          <div class="color-grid">
+            ${colorField("Fundo", "backgroundColor", design.backgroundColor)}
+            ${colorField("Texto", "textColor", design.textColor)}
+            ${colorField("Destaque", "accentColor", design.accentColor)}
+            ${colorField("QR Code", "qrColor", design.qrColor)}
+            ${colorField("Fundo do QR Code", "qrBackground", design.qrBackground)}
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Imagens</legend>
+          <label>Imagem de fundo<input type="file" name="backgroundFile" accept="image/jpeg,image/png"></label>
+          ${design.backgroundImage && html`<label class="check"><input type="checkbox" name="removeBackground"> Remover a imagem de fundo</label>`}
+          <label>Logótipo<input type="file" name="logoFile" accept="image/jpeg,image/png"></label>
+          ${design.logoImage && html`<label class="check"><input type="checkbox" name="removeLogo"> Remover o logótipo</label>`}
+          <p class="hint">JPG ou PNG, até 8 MB cada.</p>
+        </fieldset>
+
+        <button class="primary">Guardar personalização</button>
+      </form>
+    </div>
+    <p class="card-actions design-actions">
+      <a href="/admin/clientes/${event.id}/cartoes.pdf">Descarregar cartões em PDF</a>
+      <a href="/admin/clientes/${event.id}/qr.png">Descarregar QR Code em PNG</a>
+      <a href="/admin/clientes/${event.id}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
+    </p>
+  `, `/e/${event.slug}/tema.css`);
 }

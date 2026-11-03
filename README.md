@@ -4,15 +4,17 @@ Plataforma para a Batalha da Melhor Foto. Uma única aplicação serve todos os 
 
 ## Estado atual
 
-Passo 1 concluído:
+Já disponível:
 
-- Painel de administração com login
-- Criação e eliminação de clientes
-- Base de dados, link, QR Code e cartões de mesa em PDF por cliente
-- Estados do evento e página pública do convidado
+- Painel de administração, criação e eliminação de clientes
+- Base de dados, link e QR Code próprios por cliente
+- Personalização de textos, cores, imagem de fundo e logótipo
+- Cartões em PDF e QR Code em PNG e SVG
+- Área dos noivos em `/e/<link>/noivos`, com e-mail e código de acesso gerado no painel
+- Entrada dos convidados com nome e e-mail e lista de missões
 - Migrações automáticas em todas as bases
 
-Ainda por fazer: registo de convidados, envio de fotografias, ranking, votação, e-mails, painel dos noivos e exportação em ZIP.
+Ainda por fazer: envio de fotografias, ranking, moderação, votação, e-mails e exportação em ZIP.
 
 ## Tecnologia
 

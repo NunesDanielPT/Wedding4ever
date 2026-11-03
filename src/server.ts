@@ -5,19 +5,23 @@ import {
   createEvent,
   deleteEvent,
   EVENT_STATUSES,
+  eventDesign,
   getEventById,
-  getEventBySlug,
   getEventStats,
   listEvents,
+  saveEventDesign,
   setEventStatus,
+  type EventRecord,
   type EventStatus,
 } from "./db/events";
 import { isAuthenticated, isLoginLocked, isSameOrigin, login, logout, sessionCookie } from "./lib/auth";
-import { coupleNames, formatDate } from "./lib/format";
-import { tableCardsPdf } from "./lib/pdf";
-import { createQr, qrSvg } from "./lib/qr";
+import { resolveDesign, validateDesign, type Design } from "./lib/design";
+import { cardsPdfResponse, eventUrl, qrPngResponse, qrSvgResponse, removeMedia, saveMedia, type MediaKind } from "./lib/event-assets";
+import { generateCoupleCode } from "./lib/event-auth";
+import { imageExtensionOf, MAX_IMAGE_BYTES, toPdfImage } from "./lib/image";
+import { handleEvent } from "./routes/event";
+import { field, htmlResponse, isEmail, notFound, redirect } from "./routes/http";
 import * as admin from "./views/admin";
-import { eventLandingPage, notFoundPage } from "./views/public";
 
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
@@ -32,23 +36,6 @@ const SECURITY_HEADERS: Record<string, string> = {
   "X-Robots-Tag": "noindex",
 };
 
-function htmlResponse(body: string, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8", ...headers } });
-}
-
-function redirect(location: string, headers: Record<string, string> = {}): Response {
-  return new Response(null, { status: 303, headers: { Location: location, ...headers } });
-}
-
-function notFound(): Response {
-  return htmlResponse(notFoundPage(), 404);
-}
-
-function field(form: FormData, name: string): string {
-  const value = form.get(name);
-  return typeof value === "string" ? value.trim() : "";
-}
-
 function isRealDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
@@ -60,20 +47,66 @@ function validateEvent(values: Required<admin.EventForm>): string | undefined {
   if (values.partnerOne.length > 60 || values.partnerTwo.length > 60) return "Cada nome pode ter até 60 caracteres.";
   if (!isRealDate(values.eventDate)) return "Indica uma data válida para o casamento.";
   if (values.venue.length > 120) return "O local pode ter até 120 caracteres.";
-  if (values.coupleEmail.length > 160 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.coupleEmail)) {
-    return "Indica um e-mail válido para os noivos.";
-  }
+  if (!isEmail(values.coupleEmail)) return "Indica um e-mail válido para os noivos.";
   return undefined;
 }
 
-async function eventDetail(id: string, error?: string, status = 200): Promise<Response> {
+async function eventDetail(id: string, error?: string, status = 200, coupleCode?: string): Promise<Response> {
   const event = await getEventById(id);
   if (!event) return notFound();
   const stats = await getEventStats(event.db_name).catch((cause) => {
     console.error(`Base ${event.db_name} indisponível`, cause);
     return null;
   });
-  return htmlResponse(admin.eventPage(event, stats, error), status);
+  return htmlResponse(admin.eventPage(event, stats, error, coupleCode), status);
+}
+
+async function storeImage(event: EventRecord, form: FormData, name: string, kind: MediaKind): Promise<Design["logoImage"] | Error> {
+  const value = form.get(name);
+  if (!(value instanceof Blob) || value.size === 0) return undefined;
+  if (value.size > MAX_IMAGE_BYTES) return new Error("Cada imagem pode ter até 8 MB.");
+  const bytes = new Uint8Array(await value.arrayBuffer());
+  const extension = imageExtensionOf(bytes);
+  try {
+    if (!extension) throw new Error("Formato não suportado");
+    toPdfImage(bytes);
+  } catch {
+    return new Error("Usa uma imagem JPG ou PNG de 8 bits, sem entrelaçamento e com até 40 megapíxeis.");
+  }
+  await saveMedia(event.id, kind, extension, bytes);
+  return extension;
+}
+
+async function handleDesign(req: Request, event: EventRecord): Promise<Response> {
+  const form = await req.formData();
+  const current = eventDesign(event);
+  const design: Design = {
+    ...current,
+    headline: field(form, "headline"),
+    instructions: field(form, "instructions"),
+    backgroundColor: field(form, "backgroundColor"),
+    textColor: field(form, "textColor"),
+    accentColor: field(form, "accentColor"),
+    qrColor: field(form, "qrColor"),
+    qrBackground: field(form, "qrBackground"),
+  };
+  const error = validateDesign(design);
+  if (error) return htmlResponse(admin.designPage(event, design, error), 422);
+
+  for (const [input, remove, kind, key] of [
+    ["backgroundFile", "removeBackground", "background", "backgroundImage"],
+    ["logoFile", "removeLogo", "logo", "logoImage"],
+  ] as const) {
+    if (form.get(remove)) {
+      await removeMedia(event.id, kind);
+      design[key] = undefined;
+    }
+    const stored = await storeImage(event, form, input, kind);
+    if (stored instanceof Error) return htmlResponse(admin.designPage(event, design, stored.message), 422);
+    if (stored) design[key] = stored;
+  }
+  await saveEventDesign(event.id, design);
+  return redirect(`/admin/clientes/${event.id}/personalizar`);
 }
 
 async function handleAdminLogin(req: Request): Promise<Response> {
@@ -127,34 +160,29 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     }
   }
 
-  const match = path.match(/^\/admin\/clientes\/([0-9a-f-]{36})(?:\/([a-z.]+))?$/);
+  const match = path.match(/^\/admin\/clientes\/([0-9a-f-]{36})(?:\/([a-z.-]+))?$/);
   if (!match) return notFound();
   const [, id, action] = match as unknown as [string, string, string | undefined];
 
   if (!action && req.method === "GET") return eventDetail(id);
 
-  if (action === "qr.svg" && req.method === "GET") {
+  if (req.method === "GET" && action && ["qr.svg", "qr.png", "cartoes.pdf", "personalizar"].includes(action)) {
     const event = await getEventById(id);
     if (!event) return notFound();
-    return new Response(qrSvg(createQr(`${config.publicUrl}/e/${event.slug}`)), {
-      headers: { "Content-Type": "image/svg+xml" },
-    });
+    if (action === "qr.svg") return qrSvgResponse(event);
+    if (action === "qr.png") return qrPngResponse(event);
+    if (action === "cartoes.pdf") return cardsPdfResponse(event);
+    return htmlResponse(admin.designPage(event, eventDesign(event)));
   }
 
-  if (action === "cartoes.pdf" && req.method === "GET") {
+  if (action === "personalizar" && req.method === "POST") {
     const event = await getEventById(id);
-    if (!event) return notFound();
-    const pdf = tableCardsPdf({
-      couple: coupleNames(event.partner_one, event.partner_two),
-      date: formatDate(event.event_date),
-      url: `${config.publicUrl}/e/${event.slug}`,
-    });
-    return new Response(pdf, {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="cartoes-${event.slug}.pdf"`,
-      },
-    });
+    return event ? handleDesign(req, event) : notFound();
+  }
+
+  if (action === "codigo-noivos" && req.method === "POST") {
+    if (!(await getEventById(id))) return notFound();
+    return eventDetail(id, undefined, 200, await generateCoupleCode(id));
   }
 
   if (action === "estado" && req.method === "POST") {
@@ -198,12 +226,7 @@ async function route(req: Request): Promise<Response> {
 
   if (path === "/admin" || path.startsWith("/admin/")) return handleAdmin(req, path);
 
-  const eventMatch = path.match(/^\/e\/([a-z0-9-]{3,100})$/);
-  if (eventMatch && req.method === "GET") {
-    const event = await getEventBySlug(eventMatch[1]!);
-    return event ? htmlResponse(eventLandingPage(event)) : notFound();
-  }
-  return notFound();
+  return (await handleEvent(req, path)) ?? notFound();
 }
 
 export async function handle(req: Request): Promise<Response> {

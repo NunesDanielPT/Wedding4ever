@@ -10,8 +10,16 @@ const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const failures = new Map<string, { count: number; resetAt: number }>();
 const dummyHash = await Bun.password.hash(randomBytes(16).toString("hex"));
 
-function hashToken(token: string): string {
+export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+export function newToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export function clearFailures(key: string): void {
+  failures.delete(key);
 }
 
 export function isLoginLocked(email: string): boolean {
@@ -24,7 +32,7 @@ export function isLoginLocked(email: string): boolean {
   return entry.count >= MAX_FAILURES;
 }
 
-function recordFailure(email: string): void {
+export function recordFailure(email: string): void {
   const entry = failures.get(email);
   if (entry && entry.resetAt > Date.now()) entry.count++;
   else failures.set(email, { count: 1, resetAt: Date.now() + FAILURE_WINDOW_MS });
@@ -56,7 +64,7 @@ export async function login(emailInput: string, password: string): Promise<strin
     return null;
   }
   failures.delete(email);
-  const token = randomBytes(32).toString("base64url");
+  const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
   await central`DELETE FROM admin_sessions WHERE expires_at < now()`;
   await central`
@@ -66,12 +74,16 @@ export async function login(emailInput: string, password: string): Promise<strin
   return token;
 }
 
-function sessionToken(req: Request): string | undefined {
+export function readCookie(req: Request, cookie: string): string | undefined {
   for (const part of (req.headers.get("cookie") ?? "").split(";")) {
     const [name, value] = part.trim().split("=");
-    if (name === COOKIE) return value;
+    if (name === cookie) return value;
   }
   return undefined;
+}
+
+function sessionToken(req: Request): string | undefined {
+  return readCookie(req, COOKIE);
 }
 
 export async function isAuthenticated(req: Request): Promise<boolean> {
