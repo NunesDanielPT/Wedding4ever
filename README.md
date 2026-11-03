@@ -1,4 +1,4 @@
-# Batalha da Melhor Foto
+# AllForPic
 
 Plataforma de missões fotográficas e votação para casamentos, batizados, aniversários e outros eventos. Uma única aplicação serve todos os clientes, e cada evento tem a sua própria base de dados e o seu próprio utilizador PostgreSQL.
 

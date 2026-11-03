@@ -1,4 +1,4 @@
-export const DEFAULT_BRAND = "Batalha da Melhor Foto";
+export const DEFAULT_BRAND = "AllForPic";
 
 let current = DEFAULT_BRAND;
 
