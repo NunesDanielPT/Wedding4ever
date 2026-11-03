@@ -125,7 +125,7 @@ describe("criação de clientes", () => {
   test("cria base, missões, link, QR Code e PDF", async () => {
     const event = await createClient();
     expect(event.slug).toMatch(/^joao-ines-[a-z2-9]{6}$/);
-    expect(event.schema_version).toBe(2);
+    expect(event.schema_version).toBe(3);
     expect(event.status).toBe("rascunho");
     expect(await events.getEventStats(event.db_name)).toEqual({ missions: 7, guests: 0, photos: 0, photoLimit: 3 });
 
@@ -189,7 +189,7 @@ describe("ciclo de vida", () => {
     const event = await createClient();
     await events.migrateAllEvents();
     const after = (await events.getEventById(event.id))!;
-    expect(after.schema_version).toBe(2);
+    expect(after.schema_version).toBe(3);
     expect(after.migration_error).toBeNull();
     expect((await events.getEventStats(event.db_name)).missions).toBe(7);
   });
@@ -439,5 +439,92 @@ describe("envio de e-mail", () => {
     expect(smtp.received).toContain("RCPT TO:<ana@exemplo.pt>");
     expect(smtp.received.some((line) => line.startsWith("Subject: =?UTF-8?B?"))).toBe(true);
     expect(smtp.received).not.toContain("Bcc: x@y.z");
+  });
+});
+
+describe("envio de fotografias", () => {
+  async function openEvent(limit: number) {
+    const event = await createClient();
+    await events.setEventStatus(event.id, "aberto");
+    await events.setPhotoLimit(event.db_name, limit);
+    const opened = (await events.getEventById(event.id))!;
+    const [mission] = await events.eventDb(opened.db_name)`SELECT id FROM missions ORDER BY position LIMIT 1`;
+    return { event: opened, missionId: mission.id as string };
+  }
+
+  async function join(slug: string, email: string) {
+    return cookieOf(await post(`/e/${slug}/entrar`, { name: `Pessoa ${email[0]}`, email }, { Cookie: "" }));
+  }
+
+  function upload(event: { slug: string }, missionId: string, guest: string, bytes: Uint8Array, caption = "") {
+    const form = new FormData();
+    form.set("photo", new File([bytes], "foto.jpg", { type: "image/jpeg" }));
+    form.set("caption", caption);
+    return handle(new Request(`${ORIGIN}/e/${event.slug}/missoes/${missionId}/fotos`, {
+      method: "POST", body: form, headers: { Origin: ORIGIN, Cookie: guest },
+    }));
+  }
+
+  function guestGet(path: string, guest: string) {
+    return handle(new Request(`${ORIGIN}${path}`, { headers: { Cookie: guest } }));
+  }
+
+  test("aplica o limite, mostra a galeria e gera a miniatura", async () => {
+    const { event, missionId } = await openEvent(1);
+    const guest = await join(event.slug, "a@exemplo.pt");
+    expect((await upload(event, missionId, guest, PNG_1X1, "<b>Linda</b>")).status).toBe(303);
+
+    const second = await upload(event, missionId, guest, PNG_1X1);
+    expect(second.status).toBe(422);
+    expect(await second.text()).toContain("limite");
+
+    const page = await (await guestGet(`/e/${event.slug}/missoes/${missionId}`, guest)).text();
+    expect(page).toContain("1/1");
+    expect(page).toContain("Limite atingido");
+    expect(page).toContain("&lt;b&gt;Linda&lt;/b&gt;");
+
+    const [photo] = await events.eventDb(event.db_name)`SELECT id FROM photos`;
+    let status = "pending";
+    for (let i = 0; i < 50 && status === "pending"; i++) {
+      await Bun.sleep(100);
+      [{ preview_status: status }] = await events.eventDb(event.db_name)`SELECT preview_status FROM photos`;
+    }
+    expect(status).toBe("ready");
+    const preview = await guestGet(`/e/${event.slug}/fotos/${photo.id}/preview`, guest);
+    expect(preview.headers.get("content-type")).toBe("image/jpeg");
+    expect((await get(`/e/${event.slug}/fotos/${photo.id}/preview`, false)).status).toBe(303);
+  });
+
+  test("recusa vídeos e ficheiros disfarçados, e aceita HEIC pelo conteúdo", async () => {
+    const { detectPhoto } = await import("../src/lib/photos");
+    const box = (brand: string) => new TextEncoder().encode(`\0\0\0\x18ftyp${brand}\0\0\0\0`);
+    expect(detectPhoto(box("isom"))).toBeUndefined();
+    expect(detectPhoto(box("qt  "))).toBeUndefined();
+    expect(detectPhoto(box("heic"))).toBe("heic");
+
+    const { event, missionId } = await openEvent(3);
+    const guest = await join(event.slug, "b@exemplo.pt");
+    const video = await upload(event, missionId, guest, box("mp42"));
+    expect(video.status).toBe(422);
+    expect(await video.text()).toContain("JPG, PNG ou HEIC");
+    expect((await events.getEventStats(event.db_name)).photos).toBe(0);
+  });
+
+  test("só deixa enviar com a batalha aberta e só o autor apaga", async () => {
+    const { event, missionId } = await openEvent(1);
+    const owner = await join(event.slug, "c@exemplo.pt");
+    const other = await join(event.slug, "d@exemplo.pt");
+    await upload(event, missionId, owner, PNG_1X1);
+    const [photo] = await events.eventDb(event.db_name)`SELECT id FROM photos`;
+
+    const remove = (guest: string) => post(`/e/${event.slug}/fotos/${photo.id}/apagar`, {}, { Cookie: guest });
+    expect((await remove(other)).status).toBe(404);
+    expect((await events.getEventStats(event.db_name)).photos).toBe(1);
+    expect((await remove(owner)).status).toBe(303);
+    expect((await events.getEventStats(event.db_name)).photos).toBe(0);
+
+    await events.setEventStatus(event.id, "votacao");
+    const closed = (await events.getEventById(event.id))!;
+    expect((await upload(closed, missionId, owner, PNG_1X1)).status).toBe(409);
   });
 });

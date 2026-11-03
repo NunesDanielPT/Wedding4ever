@@ -198,11 +198,15 @@ export interface Mission {
   title: string;
   position: number;
   photo_limit: number;
+  sent: number;
 }
 
-export async function listMissions(dbName: string): Promise<Mission[]> {
+/** Lista as missões com o número de fotografias que este convidado já enviou. */
+export async function listMissions(dbName: string, guestId: string): Promise<Mission[]> {
   return eventDb(dbName)`
-    SELECT id, title, position, photo_limit FROM missions WHERE active ORDER BY position
+    SELECT m.id, m.title, m.position, m.photo_limit,
+           (SELECT count(*)::int FROM photos p WHERE p.mission_id = m.id AND p.guest_id = ${guestId}::uuid) AS sent
+    FROM missions m WHERE m.active ORDER BY m.position
   `;
 }
 

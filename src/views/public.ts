@@ -3,11 +3,12 @@ import { eventDesign, type EventRecord, type EventStats, type EventStatus, type 
 import { coupleNames, formatDate, initial } from "../lib/format";
 import { html, Html } from "../lib/html";
 import type { Guest } from "../lib/event-auth";
+import { MAX_CAPTION_LENGTH, type MissionDetail, type Photo } from "../lib/photos";
 import { page } from "./layout";
 
 const MESSAGES: Record<EventStatus, string> = {
   rascunho: "As missões abrem no dia do casamento. Guarda este link.",
-  aberto: "As missões estão abertas. O envio de fotografias fica disponível em breve.",
+  aberto: "As missões estão abertas. Escolhe uma e envia a tua fotografia.",
   votacao: "A votação está aberta. Em breve vais poder escolher as tuas fotos favoritas.",
   resultados: "A batalha terminou. Os vencedores serão anunciados aqui.",
   arquivado: "Este evento terminou. Obrigado por teres participado.",
@@ -60,8 +61,59 @@ export function guestHomePage(event: EventRecord, guest: Guest, missions: Missio
         <h2>A sua missão</h2>
         ${missions[0] && html`<p>${missions[0].photo_limit === 1 ? "Podes enviar 1 fotografia por missão." : `Podes enviar até ${missions[0].photo_limit} fotografias por missão.`}</p>`}
         <ul class="mission-list">
-          ${missions.map((mission) => html`<li>${mission.title}</li>`)}
+          ${missions.map((mission) => html`
+            <li><a href="/e/${event.slug}/missoes/${mission.id}"><span>${mission.title}</span><span class="mission-count">${mission.sent}/${mission.photo_limit}</span></a></li>`)}
         </ul>`}
+    </main>
+  `);
+}
+
+export function missionPage(
+  event: EventRecord,
+  guest: Guest,
+  mission: MissionDetail,
+  photos: Photo[],
+  sent: number,
+  error?: string,
+): string {
+  const atLimit = sent >= mission.photo_limit;
+  const open = event.status === "aberto";
+  return themed(event, mission.title, html`
+    <main class="guest mission-page">
+      <a class="back" href="/e/${event.slug}">Voltar às missões</a>
+      <h1>${mission.title}</h1>
+      <p class="mission-progress">${sent}/${mission.photo_limit} ${mission.photo_limit === 1 ? "fotografia enviada" : "fotografias enviadas"}</p>
+      ${error && html`<p class="error" role="alert">${error}</p>`}
+
+      ${open && html`
+        <form method="post" action="/e/${event.slug}/missoes/${mission.id}/fotos" enctype="multipart/form-data" class="stack guest-form">
+          <label>Fotografia
+            <input type="file" name="photo" accept="image/jpeg,image/png,image/heic,image/heif,.jpg,.jpeg,.png,.heic,.heif" required ${atLimit ? new Html("disabled") : ""}>
+          </label>
+          <label>Legenda, opcional
+            <input name="caption" maxlength="${MAX_CAPTION_LENGTH}" ${atLimit ? new Html("disabled") : ""}>
+          </label>
+          <button class="primary" ${atLimit ? new Html("disabled") : ""}>${atLimit ? "Limite atingido" : "Enviar fotografia"}</button>
+        </form>`}
+      ${!open && html`<p>O envio de fotografias está fechado.</p>`}
+
+      <h2>Fotografias desta missão</h2>
+      ${photos.length === 0
+        ? html`<p>Ainda não há fotografias. Sê a primeira pessoa a enviar.</p>`
+        : html`<ul class="photo-grid">
+            ${photos.map((photo) => html`
+              <li>
+                ${photo.preview_status === "ready"
+                  ? html`<img src="/e/${event.slug}/fotos/${photo.id}/preview" alt="${photo.caption || `Fotografia de ${photo.guest_name}`}" loading="lazy">`
+                  : html`<div class="photo-placeholder">${photo.preview_status === "failed" ? "Sem pré-visualização" : "A preparar a fotografia"}</div>`}
+                <p class="photo-author">${photo.guest_name}</p>
+                ${photo.caption && html`<p class="photo-caption">${photo.caption}</p>`}
+                ${open && photo.guest_id === guest.id && html`
+                  <form method="post" action="/e/${event.slug}/fotos/${photo.id}/apagar">
+                    <button class="link-button">Apagar a minha fotografia</button>
+                  </form>`}
+              </li>`)}
+          </ul>`}
     </main>
   `);
 }

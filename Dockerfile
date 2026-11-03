@@ -1,5 +1,10 @@
 FROM oven/bun:1.4-slim
 WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends imagemagick libheif1 \
+  && (apt-get install -y --no-install-recommends libheif-plugin-libde265 || true) \
+  && rm -rf /var/lib/apt/lists/* \
+  && convert -list format | grep -E 'HEIC.*r'
 COPY package.json tsconfig.json ./
 COPY src ./src
 RUN mkdir -p /data && chown bun:bun /data
