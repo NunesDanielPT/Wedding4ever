@@ -1,4 +1,4 @@
-import { EVENT_STATUSES, eventDesign, getEventBySlug, getEventStats, listMissions, setEventStatus, type EventRecord, type EventStatus } from "../db/events";
+import { EVENT_STATUSES, eventDesign, getEventBySlug, getEventStats, listGuests, listMissions, setEventStatus, type EventRecord, type EventStatus } from "../db/events";
 import { themeCss } from "../lib/design";
 import { cardsPdfResponse, mediaPath, qrPngResponse, qrSvgResponse } from "../lib/event-assets";
 import {
@@ -31,8 +31,8 @@ import { field, htmlResponse, isEmail, notFound, redirect } from "./http";
 const COUPLE_STATUSES = EVENT_STATUSES.filter((status) => status !== "arquivado");
 
 async function couplePanel(event: EventRecord, error?: string, status = 200): Promise<Response> {
-  const stats = await getEventStats(event.db_name).catch(() => null);
-  return htmlResponse(couplePanelPage(event, stats, error), status);
+  const [stats, guests] = await Promise.all([getEventStats(event.db_name), listGuests(event.db_name)]).catch(() => [null, []]);
+  return htmlResponse(couplePanelPage(event, stats, guests, error), status);
 }
 
 async function handleCouple(req: Request, event: EventRecord, action: string): Promise<Response> {

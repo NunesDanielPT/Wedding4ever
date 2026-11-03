@@ -1,9 +1,10 @@
 import { STATUS_LABELS } from "./admin";
-import { eventDesign, type EventRecord, type EventStats, type EventStatus, type Mission } from "../db/events";
+import { eventDesign, type EventRecord, type EventStats, type EventStatus, type Mission, type RegisteredGuest } from "../db/events";
 import { coupleNames, formatDate, initial } from "../lib/format";
 import { html, Html } from "../lib/html";
 import type { Guest } from "../lib/event-auth";
 import { MAX_CAPTION_LENGTH, type MissionDetail, type Photo } from "../lib/photos";
+import { guestTable } from "./guests";
 import { page } from "./layout";
 
 const MESSAGES: Record<EventStatus, string> = {
@@ -136,7 +137,7 @@ export function coupleLoginPage(event: EventRecord, error?: string, status = 200
   };
 }
 
-export function couplePanelPage(event: EventRecord, stats: EventStats | null, error?: string): string {
+export function couplePanelPage(event: EventRecord, stats: EventStats | null, guests: RegisteredGuest[], error?: string): string {
   const base = `/e/${event.slug}/noivos`;
   return themed(event, "Área dos noivos", html`
     <main class="guest couple-panel">
@@ -172,6 +173,11 @@ export function couplePanelPage(event: EventRecord, stats: EventStats | null, er
           <a href="${base}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
         </p>
       </section>
+
+      ${stats && html`<section>
+        <h2>Convidados registados</h2>
+        ${guestTable(guests)}
+      </section>`}
 
       <form method="post" action="${base}/sair"><button class="link-button">Sair</button></form>
     </main>

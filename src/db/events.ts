@@ -193,6 +193,16 @@ export async function setPhotoLimit(dbName: string, limit: number): Promise<void
   await eventDb(dbName)`UPDATE missions SET photo_limit = ${limit}`;
 }
 
+export interface RegisteredGuest {
+  full_name: string;
+  email: string;
+  created_at: Date;
+}
+
+export async function listGuests(dbName: string): Promise<RegisteredGuest[]> {
+  return eventDb(dbName)`SELECT full_name, email, created_at FROM guests ORDER BY created_at, id`;
+}
+
 export interface Mission {
   id: string;
   title: string;

@@ -1,9 +1,10 @@
-import { EVENT_STATUSES, type EventRecord, type EventStats, type EventStatus } from "../db/events";
+import { EVENT_STATUSES, type EventRecord, type EventStats, type EventStatus, type RegisteredGuest } from "../db/events";
 import type { Design } from "../lib/design";
 import { eventUrl } from "../lib/event-assets";
 import { coupleNames, formatDate, initial } from "../lib/format";
 import { html, Html } from "../lib/html";
 import { MAX_PHOTO_LIMIT, MIN_PHOTO_LIMIT, type PlatformSettings } from "../lib/settings";
+import { guestTable } from "./guests";
 import { page, rings } from "./layout";
 
 export const STATUS_LABELS: Record<EventStatus, string> = {
@@ -91,7 +92,13 @@ export function newEventPage(values: EventForm = {}, error?: string): string {
   `);
 }
 
-export function eventPage(event: EventRecord, stats: EventStats | null, error?: string, coupleCode?: string): string {
+export function eventPage(
+  event: EventRecord,
+  stats: EventStats | null,
+  guests: RegisteredGuest[],
+  error?: string,
+  coupleCode?: string,
+): string {
   const url = eventUrl(event);
   const couple = coupleNames(event.partner_one, event.partner_two);
   return shell(couple, html`
@@ -176,6 +183,11 @@ export function eventPage(event: EventRecord, stats: EventStats | null, error?: 
         </details>
       </div>
     </div>
+
+    ${stats && html`<section class="guests-section">
+      <h2>Convidados registados</h2>
+      ${guestTable(guests)}
+    </section>`}
   `);
 }
 

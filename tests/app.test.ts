@@ -528,3 +528,25 @@ describe("envio de fotografias", () => {
     expect((await upload(closed, missionId, owner, PNG_1X1)).status).toBe(409);
   });
 });
+
+describe("lista de convidados", () => {
+  test("mostra convidados numerados por ordem de criação aos dois painéis", async () => {
+    const event = await createClient();
+    await post(`/e/${event.slug}/entrar`, { name: "Primeira Pessoa", email: "primeira@exemplo.pt" }, { Cookie: "" });
+    await Bun.sleep(5);
+    await post(`/e/${event.slug}/entrar`, { name: "Segunda <b>", email: "segunda@exemplo.pt" }, { Cookie: "" });
+
+    const adminPage = await (await get(`/admin/clientes/${event.id}`)).text();
+    expect(adminPage.indexOf("primeira@exemplo.pt")).toBeLessThan(adminPage.indexOf("segunda@exemplo.pt"));
+    expect(adminPage).toMatch(/guest-number">1<[\s\S]*Primeira Pessoa[\s\S]*guest-number">2</);
+    expect(adminPage).toContain("Segunda &lt;b&gt;");
+
+    const page = await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text();
+    const code = page.match(/Código de acesso: <strong>([A-Z2-9]{10})</)![1]!;
+    const base = `/e/${event.slug}/noivos`;
+    const login = await post(`${base}/entrar`, { email: event.couple_email, code }, { Cookie: "" });
+    const couplePage = await handle(new Request(`${ORIGIN}${base}`, { headers: { Cookie: cookieOf(login) } }));
+    expect(await couplePage.text()).toContain("segunda@exemplo.pt");
+    expect(await (await get(`/e/${event.slug}`, false)).text()).not.toContain("segunda@exemplo.pt");
+  });
+});

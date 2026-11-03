@@ -9,6 +9,7 @@ import {
   getEventById,
   getEventStats,
   listEvents,
+  listGuests,
   saveEventDesign,
   setEventStatus,
   setPhotoLimit,
@@ -57,11 +58,11 @@ function validateEvent(values: Required<admin.EventForm>): string | undefined {
 async function eventDetail(id: string, error?: string, status = 200, coupleCode?: string): Promise<Response> {
   const event = await getEventById(id);
   if (!event) return notFound();
-  const stats = await getEventStats(event.db_name).catch((cause) => {
+  const [stats, guests] = await Promise.all([getEventStats(event.db_name), listGuests(event.db_name)]).catch((cause) => {
     console.error(`Base ${event.db_name} indisponível`, cause);
-    return null;
+    return [null, []];
   });
-  return htmlResponse(admin.eventPage(event, stats, error, coupleCode), status);
+  return htmlResponse(admin.eventPage(event, stats, guests, error, coupleCode), status);
 }
 
 async function storeImage(event: EventRecord, form: FormData, name: string, kind: MediaKind): Promise<Design["logoImage"] | Error> {
