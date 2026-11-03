@@ -11,16 +11,13 @@ import {
   listEvents,
   listGuests,
   applyEventStatus,
-  saveEventDesign,
   setPhotoLimit,
   type EventRecord,
   type EventStatus,
 } from "./db/events";
 import { isAuthenticated, isLoginLocked, isSameOrigin, login, logout, sessionCookie } from "./lib/auth";
-import { resolveDesign, validateDesign, type Design } from "./lib/design";
-import { cardsPdfResponse, eventUrl, qrPngResponse, qrSvgResponse, removeMedia, saveMedia, type MediaKind } from "./lib/event-assets";
-import { generateCoupleCode } from "./lib/event-auth";
-import { imageExtensionOf, MAX_IMAGE_BYTES, toPdfImage } from "./lib/image";
+import { cardsPdfResponse, qrPngResponse, qrSvgResponse } from "./lib/event-assets";
+import { generateClientCode } from "./lib/event-auth";
 import { sendMail } from "./lib/mail";
 import {
   addMission,
@@ -33,7 +30,12 @@ import {
   type MissionPhase,
 } from "./lib/missions";
 import { getSettings, parsePhotoLimit, saveDefaultPhotoLimit, saveEmailSettings, type SmtpSecurity } from "./lib/settings";
+import { countUnreadMessages } from "./lib/site";
+import { handleSiteAdmin } from "./routes/admin-site";
+import { handleClient } from "./routes/client";
+import { handleDesign } from "./routes/design";
 import { handleEvent } from "./routes/event";
+import { handleSite } from "./routes/site";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./routes/http";
 import * as admin from "./views/admin";
 
@@ -42,6 +44,7 @@ const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
   "/static/favicon.svg": "favicon.svg",
   "/static/gallery.js": "gallery.js",
+  "/static/site.css": "site.css",
 };
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy":
@@ -76,53 +79,6 @@ async function eventDetail(id: string, error?: string, status = 200, coupleCode?
   return htmlResponse(admin.eventPage(event, stats, guests, error, coupleCode), status);
 }
 
-async function storeImage(event: EventRecord, form: FormData, name: string, kind: MediaKind): Promise<Design["logoImage"] | Error> {
-  const value = form.get(name);
-  if (!(value instanceof Blob) || value.size === 0) return undefined;
-  if (value.size > MAX_IMAGE_BYTES) return new Error("Cada imagem pode ter até 8 MB.");
-  const bytes = new Uint8Array(await value.arrayBuffer());
-  const extension = imageExtensionOf(bytes);
-  try {
-    if (!extension) throw new Error("Formato não suportado");
-    toPdfImage(bytes);
-  } catch {
-    return new Error("Usa uma imagem JPG ou PNG de 8 bits, sem entrelaçamento e com até 40 megapíxeis.");
-  }
-  await saveMedia(event.id, kind, extension, bytes);
-  return extension;
-}
-
-async function handleDesign(req: Request, event: EventRecord): Promise<Response> {
-  const form = await req.formData();
-  const current = eventDesign(event);
-  const design: Design = {
-    ...current,
-    headline: field(form, "headline"),
-    instructions: field(form, "instructions"),
-    backgroundColor: field(form, "backgroundColor"),
-    textColor: field(form, "textColor"),
-    accentColor: field(form, "accentColor"),
-    qrColor: field(form, "qrColor"),
-    qrBackground: field(form, "qrBackground"),
-  };
-  const error = validateDesign(design);
-  if (error) return htmlResponse(admin.designPage(event, design, error), 422);
-
-  for (const [input, remove, kind, key] of [
-    ["backgroundFile", "removeBackground", "background", "backgroundImage"],
-    ["logoFile", "removeLogo", "logo", "logoImage"],
-  ] as const) {
-    if (form.get(remove)) {
-      await removeMedia(event.id, kind);
-      design[key] = undefined;
-    }
-    const stored = await storeImage(event, form, input, kind);
-    if (stored instanceof Error) return htmlResponse(admin.designPage(event, design, stored.message), 422);
-    if (stored) design[key] = stored;
-  }
-  await saveEventDesign(event.id, design);
-  return redirect(`/admin/clientes/${event.id}/personalizar`);
-}
 
 async function missionsPage(event: EventRecord, error?: string, status = 200): Promise<Response> {
   return htmlResponse(admin.missionsPage(event, await listAdminMissions(event.db_name), error), status);
@@ -267,7 +223,12 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     return redirect("/admin/entrar", { "Set-Cookie": sessionCookie(null) });
   }
   if (path === "/admin/definicoes" || path.startsWith("/admin/definicoes/")) return handleSettings(req, path);
-  if (path === "/admin" && req.method === "GET") return htmlResponse(admin.dashboardPage(await listEvents()));
+  if (path === "/admin/site" || path.startsWith("/admin/site/") || path === "/admin/mensagens" || path.startsWith("/admin/mensagens/")) {
+    return handleSiteAdmin(req, path);
+  }
+  if (path === "/admin" && req.method === "GET") {
+    return htmlResponse(admin.dashboardPage(await listEvents(), await countUnreadMessages()));
+  }
   if (path === "/admin/clientes/novo" && req.method === "GET") return htmlResponse(admin.newEventPage());
 
   if (path === "/admin/clientes" && req.method === "POST") {
@@ -308,7 +269,7 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
 
   if (action === "personalizar" && req.method === "POST") {
     const event = await getEventById(id);
-    return event ? handleDesign(req, event) : notFound();
+    return event ? handleDesign(req, event, { base: `/admin/clientes/${event.id}`, back: `/admin/clientes/${event.id}` }) : notFound();
   }
 
   if (action === "limite-fotos" && req.method === "POST") {
@@ -326,8 +287,8 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
   }
 
   if (action === "codigo-noivos" && req.method === "POST") {
-    if (!(await getEventById(id))) return notFound();
-    return eventDetail(id, undefined, 200, await generateCoupleCode(id));
+    const event = await getEventById(id);
+    return event ? eventDetail(id, undefined, 200, await generateClientCode(event)) : notFound();
   }
 
   if (action === "estado" && req.method === "POST") {
@@ -361,7 +322,6 @@ async function route(req: Request): Promise<Response> {
     await central`SELECT 1`;
     return Response.json({ ok: true });
   }
-  if (path === "/") return redirect("/admin");
 
   const staticFile = STATIC_FILES[path];
   if (staticFile) {
@@ -372,7 +332,7 @@ async function route(req: Request): Promise<Response> {
 
   if (path === "/admin" || path.startsWith("/admin/")) return handleAdmin(req, path);
 
-  return (await handleEvent(req, path)) ?? notFound();
+  return (await handleSite(req, path)) ?? (await handleClient(req, path)) ?? (await handleEvent(req, path)) ?? notFound();
 }
 
 export async function handle(req: Request): Promise<Response> {
@@ -384,5 +344,6 @@ export async function handle(req: Request): Promise<Response> {
     response = new Response("Ocorreu um erro interno.", { status: 500 });
   }
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) response.headers.set(name, value);
+  if (new URL(req.url).pathname === "/") response.headers.delete("X-Robots-Tag");
   return response;
 }

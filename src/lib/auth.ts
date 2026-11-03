@@ -103,7 +103,7 @@ export async function logout(req: Request): Promise<void> {
 export function sessionCookie(token: string | null): string {
   const secure = config.secureCookies ? "; Secure" : "";
   const maxAge = token ? SESSION_DAYS * 86_400 : 0;
-  return `${COOKIE}=${token ?? ""}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
+  return `${COOKIE}=${token ?? ""}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
 }
 
 /** Aceita formulários apenas quando vêm do próprio site. */

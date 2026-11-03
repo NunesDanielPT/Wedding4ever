@@ -44,7 +44,7 @@ function photosDir(eventId: string): string {
   return join(config.storageDir, "events", eventId, "photos");
 }
 
-function originalPath(eventId: string, photoId: string, extension: string): string {
+export function originalPath(eventId: string, photoId: string, extension: string): string {
   return join(photosDir(eventId), `${photoId}.${extension}`);
 }
 

@@ -279,31 +279,6 @@ describe("convidados", () => {
   });
 });
 
-describe("noivos", () => {
-  test("entram com e-mail e código e controlam a batalha", async () => {
-    const event = await createClient();
-    const generated = await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text();
-    const code = generated.match(/Código de acesso: <strong>([A-Z2-9]{10})</)![1]!;
-    const base = `/e/${event.slug}/noivos`;
-
-    expect((await post(`${base}/estado`, { status: "aberto" }, { Cookie: "" })).status).toBe(401);
-    expect((await post(`${base}/entrar`, { email: "outro@exemplo.pt", code }, { Cookie: "" })).status).toBe(401);
-    const login = await post(`${base}/entrar`, { email: event.couple_email, code: code.toLowerCase() }, { Cookie: "" });
-    expect(login.status).toBe(303);
-    const coupleCookie = cookieOf(login);
-
-    expect((await post(`${base}/estado`, { status: "votacao" }, { Cookie: coupleCookie })).status).toBe(303);
-    expect((await events.getEventById(event.id))!.status).toBe("votacao");
-    expect((await post(`${base}/estado`, { status: "arquivado" }, { Cookie: coupleCookie })).status).toBe(422);
-
-    const download = await handle(new Request(`${ORIGIN}${base}/qr.png`, { headers: { Cookie: coupleCookie } }));
-    expect(download.headers.get("content-type")).toBe("image/png");
-
-    await post(`/admin/clientes/${event.id}/codigo-noivos`, {});
-    const revoked = await handle(new Request(`${ORIGIN}${base}`, { headers: { Cookie: coupleCookie } }));
-    expect(await revoked.text()).toContain("Código de acesso");
-  });
-});
 
 describe("definições", () => {
   test("aplica o limite predefinido aos novos clientes e permite ajustar cada um", async () => {
@@ -487,18 +462,6 @@ describe("missões de cada cliente", () => {
     expect((await events.getEventStats(opened.db_name)).photos).toBe(0);
   });
 
-  test("os noivos controlam a fase de cada missão", async () => {
-    const event = await createClient();
-    const page = await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text();
-    const code = page.match(/Código de acesso: <strong>([A-Z2-9]{10})</)![1]!;
-    const base = `/e/${event.slug}/noivos`;
-    const couple = cookieOf(await post(`${base}/entrar`, { email: event.couple_email, code }, { Cookie: "" }));
-    const [mission] = await events.eventDb(event.db_name)`SELECT id FROM missions ORDER BY position LIMIT 1`;
-    expect((await post(`${base}/missoes/${mission.id}/fase`, { phase: "votacao" }, { Cookie: couple })).status).toBe(303);
-    expect((await post(`${base}/missoes/${mission.id}/fase`, { phase: "votacao" }, { Cookie: "" })).status).toBe(401);
-    const [updated] = await events.eventDb(event.db_name)`SELECT phase FROM missions WHERE id = ${mission.id}::uuid`;
-    expect(updated.phase).toBe("votacao");
-  });
 });
 
 describe("envio de fotografias", () => {
@@ -652,7 +615,7 @@ describe("envio de fotografias", () => {
 });
 
 describe("lista de convidados", () => {
-  test("mostra convidados numerados por ordem de criação aos dois painéis", async () => {
+  test("mostra convidados numerados por ordem de criação", async () => {
     const event = await createClient();
     await post(`/e/${event.slug}/entrar`, { name: "Primeira Pessoa", email: "primeira@exemplo.pt" }, { Cookie: "" });
     await Bun.sleep(5);
@@ -663,12 +626,178 @@ describe("lista de convidados", () => {
     expect(adminPage).toMatch(/guest-number">1<[\s\S]*Primeira Pessoa[\s\S]*guest-number">2</);
     expect(adminPage).toContain("Segunda &lt;b&gt;");
 
+    expect(await (await get(`/e/${event.slug}`, false)).text()).not.toContain("segunda@exemplo.pt");
+  });
+});
+
+describe("site público", () => {
+  test("mostra a página de venda sem secções vazias e permite indexação", async () => {
+    const response = await get("/", false);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-robots-tag")).toBeNull();
+    const body = await response.text();
+    expect(body).toContain("Até 100 convidados");
+    expect(body).toContain("Sob consulta");
+    expect(body).toContain("Área de cliente");
+    expect(body).not.toContain("O que dizem os noivos");
+  });
+
+  test("o painel altera textos, packs, testemunhos e imagens", async () => {
+    const before = await (await get("/admin/site")).text();
+    expect(before).toContain("Guardar textos");
+    const { getSite } = await import("../src/lib/site");
+    const site = await getSite();
+
+    const texts = new FormData();
+    for (const [key, value] of Object.entries(site.texts)) if (key !== "heroImage") texts.set(key, value);
+    texts.set("heroTitle", "Título novo <b>");
+    texts.set("heroImage", new File([PNG_1X1], "h.png", { type: "image/png" }));
+    expect((await postMultipart("/admin/site/textos", texts)).status).toBe(303);
+
+    const testimonial = new FormData();
+    testimonial.set("text", "Foi a melhor parte da festa");
+    testimonial.set("author", "Cliente Real");
+    expect((await postMultipart("/admin/site/testimonials", testimonial)).status).toBe(303);
+
+    const pack = (await getSite()).packs[0]!;
+    const edited = new FormData();
+    edited.set("name", "Pack Editado");
+    edited.set("guests", "Até 80 convidados");
+    edited.set("price", "199 €");
+    edited.set("features", "Linha um\nLinha dois");
+    expect((await postMultipart(`/admin/site/packs/${pack.id}/guardar`, edited)).status).toBe(303);
+
+    const bad = new FormData();
+    bad.set("title", "Anúncio");
+    bad.set("url", "javascript:alert(1)");
+    expect((await postMultipart("/admin/site/ads", bad)).status).toBe(422);
+
+    const body = await (await get("/", false)).text();
+    expect(body).toContain("Título novo &lt;b&gt;");
+    expect(body).toContain("Foi a melhor parte da festa");
+    expect(body).toContain("199 €");
+    const image = (await getSite()).texts.heroImage;
+    expect((await get(`/media/site/${image}`, false)).headers.get("content-type")).toBe("image/png");
+    expect((await post("/admin/site/textos", {}, { Cookie: "" })).status).toBe(401);
+  });
+
+  test("recebe mensagens de suporte no painel e trava abusos", async () => {
+    const send = (fields: Record<string, string>) => post("/suporte", fields, { Cookie: "", "X-Real-IP": "10.0.0.9" });
+    const valid = { name: "Maria", email: "maria@exemplo.pt", message: "Quero saber mais sobre os packs" };
+    expect((await send({ ...valid, email: "x" })).status).toBe(422);
+    expect((await send({ ...valid, website: "spam" })).status).toBe(303);
+    expect(await (await get("/admin/mensagens")).text()).not.toContain("maria@exemplo.pt");
+
+    expect((await send(valid)).status).toBe(303);
+    const inbox = await (await get("/admin/mensagens")).text();
+    expect(inbox).toContain("maria@exemplo.pt");
+    expect(inbox).toContain("message-unread");
+    expect(await (await get("/admin")).text()).toContain("1 mensagem por ler");
+
+    const id = inbox.match(/mensagens\/([0-9a-f-]{36})\/lida/)![1];
+    await post(`/admin/mensagens/${id}/lida`, {});
+    expect(await (await get("/admin/mensagens")).text()).not.toContain("message-unread");
+    await post(`/admin/mensagens/${id}/apagar`, {});
+    expect(await (await get("/admin/mensagens")).text()).toContain("Ainda não recebeste");
+
+    for (let i = 0; i < 5; i++) await send(valid);
+    expect((await send(valid)).status).toBe(422);
+    expect((await get("/admin/mensagens", false)).status).toBe(303);
+  });
+});
+
+describe("área de cliente", () => {
+  async function clientEvent(email = "produtora@exemplo.pt") {
+    const event = await createClient({ ...couple, coupleEmail: email });
     const page = await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text();
     const code = page.match(/Código de acesso: <strong>([A-Z2-9]{10})</)![1]!;
-    const base = `/e/${event.slug}/noivos`;
-    const login = await post(`${base}/entrar`, { email: event.couple_email, code }, { Cookie: "" });
-    const couplePage = await handle(new Request(`${ORIGIN}${base}`, { headers: { Cookie: cookieOf(login) } }));
-    expect(await couplePage.text()).toContain("segunda@exemplo.pt");
-    expect(await (await get(`/e/${event.slug}`, false)).text()).not.toContain("segunda@exemplo.pt");
+    return { event: (await events.getEventById(event.id))!, code };
+  }
+
+  async function login(email: string, code: string) {
+    const response = await post("/entrar", { email, code }, { Cookie: "" });
+    expect(response.status).toBe(303);
+    return cookieOf(response);
+  }
+
+  const asClient = (path: string, session: string) => handle(new Request(`${ORIGIN}${path}`, { headers: { Cookie: session } }));
+
+  test("uma produtora vê os seus eventos e não os de outros", async () => {
+    const first = await clientEvent();
+    const second = await createClient({ ...couple, partnerOne: "Marta", coupleEmail: "produtora@exemplo.pt" });
+    const other = await clientEvent("outra@exemplo.pt");
+    expect((await post("/entrar", { email: "produtora@exemplo.pt", code: "ERRADO" }, { Cookie: "" })).status).toBe(401);
+
+    const session = await login("PRODUTORA@exemplo.pt", first.code.toLowerCase());
+    const list = await (await asClient("/cliente", session)).text();
+    expect(list).toContain(`/cliente/eventos/${first.event.id}`);
+    expect(list).toContain(`/cliente/eventos/${second.id}`);
+    expect(list).not.toContain(other.event.id);
+    expect((await asClient(`/cliente/eventos/${other.event.id}`, session)).status).toBe(303);
+    expect((await asClient(`/cliente/eventos/${other.event.id}/fotos.zip`, session)).status).toBe(303);
+    expect((await asClient(`/cliente/eventos/${first.event.id}`, session)).status).toBe(200);
+    expect((await get(`/cliente/eventos/${other.event.id}`)).status).toBe(200);
+    expect((await get("/e/x-y-z/noivos", false)).status).toBe(404);
+
+    await post(`/admin/clientes/${first.event.id}/codigo-noivos`, {});
+    expect((await asClient("/cliente", session)).status).toBe(303);
+  });
+
+  test("gere missões, personaliza, vê a galeria, descarrega o ZIP e revela vencedores", async () => {
+    const { event, code } = await clientEvent("noivos@exemplo.pt");
+    await events.setEventStatus(event.id, "aberto");
+    const session = await login("noivos@exemplo.pt", code);
+    const [mission] = await events.eventDb(event.db_name)`SELECT id FROM missions ORDER BY position LIMIT 1`;
+    const a = cookieOf(await post(`/e/${event.slug}/entrar`, { name: "Rita/Sousa", email: "r@exemplo.pt" }, { Cookie: "" }));
+    const b = cookieOf(await post(`/e/${event.slug}/entrar`, { name: "Luís", email: "l@exemplo.pt" }, { Cookie: "" }));
+    const form = new FormData();
+    form.set("photo", new File([PNG_1X1], "a.png", { type: "image/png" }));
+    await handle(new Request(`${ORIGIN}/e/${event.slug}/missoes/${mission.id}/fotos`, { method: "POST", body: form, headers: { Origin: ORIGIN, Cookie: a } }));
+    let photo: { id: string } | undefined;
+    for (let i = 0; i < 60 && !photo; i++) {
+      [photo] = await events.eventDb(event.db_name)`SELECT id FROM photos WHERE preview_status = 'ready'`;
+      if (!photo) await Bun.sleep(100);
+    }
+
+    const base = `/cliente/eventos/${event.id}`;
+    expect(await (await asClient(`${base}/galeria`, session)).text()).toContain(`${base}/fotos/${photo!.id}/thumb`);
+    expect((await asClient(`${base}/fotos/${photo!.id}/preview`, session)).status).toBe(200);
+    expect((await asClient(`${base}/qr.png`, session)).headers.get("content-type")).toBe("image/png");
+    expect((await asClient(`${base}/personalizar`, session)).status).toBe(200);
+    const design = designForm({ headline: "Título do cliente" });
+    const saved = await handle(new Request(`${ORIGIN}${base}/personalizar`, { method: "POST", body: design, headers: { Origin: ORIGIN, Cookie: session } }));
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get("location")).toBe(`${base}/personalizar`);
+
+    const zipResponse = await asClient(`${base}/fotos.zip`, session);
+    expect(zipResponse.headers.get("content-type")).toBe("application/zip");
+    const zipPath = join(storage, "album.zip");
+    await Bun.write(zipPath, await zipResponse.arrayBuffer());
+    const listing = Bun.spawnSync(["python3", "-c", "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); print(z.testzip()); print(z.namelist())", zipPath]);
+    const output = listing.stdout.toString();
+    expect(output).toContain("None");
+    expect(output).toContain("Rita Sousa.png");
+    expect(output).toContain("Foto com todos da sua mesa/");
+
+    const phase = (value: string) => post(`${base}/missoes/${mission.id}/fase`, { phase: value }, { Cookie: session });
+    expect((await phase("votacao")).status).toBe(303);
+    expect((await post(`/e/${event.slug}/fotos/${photo!.id}/votar`, {}, { Cookie: b })).status).toBe(303);
+    expect((await phase("encerrada")).status).toBe(303);
+
+    const winners = await (await asClient(`${base}/vencedores`, session)).text();
+    expect(winners).toContain("WINNER");
+    expect(winners).toContain("Rita/Sousa");
+    expect(await (await asClient(`/e/${event.slug}`, b)).text()).toContain("Ver os vencedores");
+    expect(await (await asClient(`/e/${event.slug}/vencedores`, b)).text()).toContain("WINNER");
+  });
+
+  test("o ZIP com mais de 4 GB usa o formato ZIP64", async () => {
+    const { zipStream } = await import("../src/lib/zip");
+    const source = join(storage, "zip64.bin");
+    await Bun.write(source, "conteúdo de teste");
+    const path = join(storage, "zip64.zip");
+    await Bun.write(path, await new Response(zipStream([{ name: "a/foto ç.jpg", path: source }, { name: "b.jpg", path: source }], 0)).arrayBuffer());
+    const check = Bun.spawnSync(["python3", "-c", "import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); print(z.testzip(), len(z.namelist()), z.read('a/foto ç.jpg').decode())", path]);
+    expect(check.stdout.toString().trim()).toBe("None 2 conteúdo de teste");
   });
 });

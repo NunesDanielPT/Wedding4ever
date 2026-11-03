@@ -7,10 +7,14 @@ const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   return c >>> 0;
 });
 
-function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
+export function crc32Update(start: number, bytes: Uint8Array): number {
+  let crc = start;
   for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 255]! ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
+  return crc;
+}
+
+function crc32(bytes: Uint8Array): number {
+  return (crc32Update(0xffffffff, bytes) ^ 0xffffffff) >>> 0;
 }
 
 function chunk(type: string, data: Uint8Array): Uint8Array {

@@ -169,6 +169,10 @@ export async function getEventById(id: string): Promise<EventRecord | undefined>
   return rows[0];
 }
 
+export async function listEventsForClient(email: string): Promise<EventRecord[]> {
+  return central`SELECT ${SELECT_EVENT} FROM events WHERE couple_email = ${email} ORDER BY event_date DESC, created_at DESC`;
+}
+
 export async function getEventBySlug(slug: string): Promise<EventRecord | undefined> {
   const rows: EventRecord[] = await central`SELECT ${SELECT_EVENT} FROM events WHERE slug = ${slug}`;
   return rows[0];

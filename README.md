@@ -13,6 +13,10 @@ Já disponível:
 - Área dos noivos em `/e/<link>/noivos`, com e-mail e código de acesso gerado no painel
 - Entrada dos convidados com nome e e-mail e lista de missões
 - Envio de fotografias JPG, PNG e HEIC, com legenda e miniaturas
+- Site público editável em `/admin/site`, com packs, testemunhos, publicidade e suporte
+- Mensagens de suporte em `/admin/mensagens`
+- Área de cliente em `/entrar`, com galeria, ZIP, downloads, personalização e gestão das missões
+- Apresentação dos vencedores
 - Missões por cliente, sem mínimo nem máximo, com sugestões, escrita livre e limite próprio
 - Fases por missão: envio, votação e encerrada
 - Galeria em ecrã inteiro com deslize, um voto por missão e vencedora

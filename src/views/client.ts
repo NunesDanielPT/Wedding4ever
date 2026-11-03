@@ -1,0 +1,188 @@
+import type { EventRecord, EventStats, RegisteredGuest } from "../db/events";
+import { EVENT_STATUSES } from "../db/events";
+import { coupleNames, formatDate } from "../lib/format";
+import { html, Html } from "../lib/html";
+import { PHASE_LABELS, type AdminMission, type AlbumPhoto, type MissionPhase } from "../lib/missions";
+import { type DesignContext, STATUS_LABELS } from "./admin";
+import { guestTable } from "./guests";
+import { page, rings } from "./layout";
+
+function clientShell(title: string, content: Html, stylesheet?: string): string {
+  return page(`${title} | Wedding4Ever`, html`
+    <header class="topbar">
+      <a class="brand" href="/cliente">${rings}<span>Wedding4Ever</span></a>
+      <nav class="topnav">
+        <a href="/cliente">Os meus eventos</a>
+        <form method="post" action="/cliente/sair"><button class="link-button">Sair</button></form>
+      </nav>
+    </header>
+    <main class="admin">${content}</main>
+  `, "", stylesheet);
+}
+
+export function clientContext(event: EventRecord): DesignContext {
+  const base = `/cliente/eventos/${event.id}`;
+  return { base, back: base, wrap: clientShell };
+}
+
+export function clientLoginPage(error?: string): string {
+  return page("Área de cliente | Wedding4Ever", html`
+    <main class="login">
+      <a class="brand brand-large" href="/">${rings}<span>Wedding4Ever</span></a>
+      <h1 class="login-title">Área de cliente</h1>
+      <form method="post" action="/entrar" class="stack">
+        ${error && html`<p class="error" role="alert">${error}</p>`}
+        <label>E-mail<input type="email" name="email" autocomplete="username" required autofocus></label>
+        <label>Código de acesso<input name="code" autocomplete="current-password" required></label>
+        <button class="primary">Entrar</button>
+      </form>
+    </main>
+  `);
+}
+
+export function clientEventsPage(events: EventRecord[]): string {
+  return clientShell("Os meus eventos", html`
+    <h1>Os meus eventos</h1>
+    ${events.length === 0
+      ? html`<div class="empty"><p>Ainda não há eventos nesta conta.</p></div>`
+      : html`<ul class="client-list event-list">
+          ${events.map((event) => html`
+            <li><a href="/cliente/eventos/${event.id}">
+              <span class="client-name">${coupleNames(event.partner_one, event.partner_two)}</span>
+              <span class="client-date">${formatDate(event.event_date)}</span>
+              <span class="status status-${event.status}">${STATUS_LABELS[event.status]}</span>
+            </a></li>`)}
+        </ul>`}
+  `);
+}
+
+const PHASE_ACTIONS: Record<MissionPhase, string> = {
+  envio: "Iniciar envio de fotografias",
+  votacao: "Iniciar votação",
+  encerrada: "Encerrar missão",
+};
+
+function missionControls(event: EventRecord, mission: AdminMission): Html {
+  const base = `/cliente/eventos/${event.id}/missoes/${mission.id}/fase`;
+  return html`
+    <li class="client-mission">
+      <div>
+        <h3>${mission.title}</h3>
+        <p>${PHASE_LABELS[mission.phase]}. ${mission.photos} ${mission.photos === 1 ? "fotografia" : "fotografias"}, ${mission.votes} ${mission.votes === 1 ? "voto" : "votos"}.</p>
+      </div>
+      <div class="phase-buttons">
+        ${(Object.keys(PHASE_ACTIONS) as MissionPhase[]).map((phase) => html`
+          <form method="post" action="${base}">
+            <input type="hidden" name="phase" value="${phase}">
+            <button ${phase === mission.phase ? new Html("disabled") : ""}>${PHASE_ACTIONS[phase]}</button>
+          </form>`)}
+      </div>
+    </li>`;
+}
+
+export function clientEventPage(
+  event: EventRecord,
+  stats: EventStats,
+  guests: RegisteredGuest[],
+  missions: AdminMission[],
+  error?: string,
+): string {
+  const base = `/cliente/eventos/${event.id}`;
+  const couple = coupleNames(event.partner_one, event.partner_two);
+  return clientShell(couple, html`
+    <a class="back" href="/cliente">Voltar aos eventos</a>
+    <h1>${couple}</h1>
+    <p class="lead">${formatDate(event.event_date)}</p>
+    ${error && html`<p class="error" role="alert">${error}</p>`}
+
+    <dl class="facts client-facts">
+      <div><dt>Pessoas registadas</dt><dd>${stats.guests}</dd></div>
+      <div><dt>Fotografias</dt><dd>${stats.photos}</dd></div>
+      <div><dt>Missões</dt><dd>${stats.missions}</dd></div>
+    </dl>
+
+    <p class="client-actions">
+      <a class="primary" href="${base}/galeria">Ver galeria</a>
+      <a class="primary" href="${base}/vencedores">Apresentar vencedores</a>
+      <a class="action" href="${base}/fotos.zip">Descarregar fotografias em ZIP</a>
+    </p>
+
+    <section id="missoes" class="client-section">
+      <h2>Gestão das missões</h2>
+      ${missions.length === 0
+        ? html`<p>Este evento ainda não tem missões.</p>`
+        : html`<ul class="client-missions">${missions.map((mission) => missionControls(event, mission))}</ul>`}
+    </section>
+
+    <section class="client-section">
+      <h2>Estado geral do evento</h2>
+      ${event.status === "arquivado"
+        ? html`<p>Este evento foi arquivado.</p>`
+        : html`<form method="post" action="${base}/estado" class="inline-form narrow-state">
+            <select name="status" aria-label="Estado do evento">
+              ${EVENT_STATUSES.filter((status) => status !== "arquivado").map((status) => html`<option value="${status}" ${status === event.status ? new Html("selected") : ""}>${STATUS_LABELS[status]}</option>`)}
+            </select>
+            <button>Guardar estado</button>
+          </form>`}
+    </section>
+
+    <section class="client-section">
+      <h2>Cartões e QR Code</h2>
+      <p class="downloads">
+        <a href="${base}/personalizar">Personalizar cartões e página</a>
+        <a href="${base}/cartoes.pdf">Descarregar cartões em PDF</a>
+        <a href="${base}/qr.png">Descarregar QR Code em PNG</a>
+        <a href="${base}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
+      </p>
+    </section>
+
+    <section class="client-section">
+      <h2>Convidados registados</h2>
+      ${guestTable(guests)}
+    </section>
+  `);
+}
+
+export function clientGalleryPage(event: EventRecord, album: AlbumPhoto[]): string {
+  const base = `/cliente/eventos/${event.id}`;
+  const ready = album.filter((photo) => photo.preview_status === "ready");
+  const groups = new Map<string, { photo: AlbumPhoto; index: number }[]>();
+  ready.forEach((photo, index) => {
+    const group = groups.get(photo.mission_title) ?? [];
+    group.push({ photo, index });
+    groups.set(photo.mission_title, group);
+  });
+  return clientShell("Galeria", html`
+    <a class="back" href="${base}">Voltar ao evento</a>
+    <div class="page-head">
+      <h1>Galeria</h1>
+      <a class="primary" href="${base}/fotos.zip">Descarregar ZIP</a>
+    </div>
+    ${ready.length === 0 && html`<div class="empty"><p>As fotografias aparecem aqui quando os convidados começarem a enviar.</p></div>`}
+    ${[...groups].map(([title, photos]) => html`
+      <section class="client-section">
+        <h2>${title}</h2>
+        <ul class="photo-grid client-grid">
+          ${photos.map(({ photo, index }) => html`
+            <li>
+              <a href="${base}/fotos/${photo.id}/preview" data-open="${index}">
+                <img src="${base}/fotos/${photo.id}/thumb" alt="${photo.caption || `Fotografia de ${photo.guest_name}`}" width="480" height="480" loading="lazy">
+              </a>
+              <p class="photo-author">${photo.guest_name}</p>
+            </li>`)}
+        </ul>
+      </section>`)}
+    ${ready.length > 0 && html`
+      <div class="viewer" data-viewer hidden role="dialog" aria-modal="true" aria-label="Galeria de fotografias">
+        <div class="viewer-bar"><span data-counter aria-live="polite"></span><button class="viewer-close" data-close>Fechar</button></div>
+        <div class="viewer-track" data-track tabindex="0">
+          ${ready.map((photo) => html`
+            <figure class="viewer-slide">
+              <img src="${base}/fotos/${photo.id}/preview" alt="${photo.caption || `Fotografia de ${photo.guest_name}`}" loading="lazy">
+              <figcaption><p>${photo.guest_name}</p>${photo.caption && html`<p>${photo.caption}</p>`}</figcaption>
+            </figure>`)}
+        </div>
+      </div>
+      <script src="/static/gallery.js" defer></script>`}
+  `);
+}

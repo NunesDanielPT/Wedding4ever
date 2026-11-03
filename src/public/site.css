@@ -1,0 +1,77 @@
+.site-page { background: var(--paper); }
+.site-header { align-items: center; display: flex; flex-wrap: wrap; gap: .75rem 2rem; justify-content: space-between; margin: 0 auto; max-width: 1180px; padding: 1.1rem clamp(1rem, 4vw, 2.5rem); }
+.site-header nav { align-items: center; display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; }
+.site-header nav a { text-decoration: none; }
+.site-header .site-login { border: 1px solid var(--navy); border-radius: 3px; padding: .45rem .85rem; }
+.site-button { background: var(--navy); border: 1px solid var(--navy); border-radius: 3px; color: #fff; cursor: pointer; display: inline-block; font: inherit; min-height: 48px; padding: .7rem 1.5rem; text-align: center; text-decoration: none; }
+
+.site-page main > section { margin: 0 auto; max-width: 1180px; padding: clamp(3rem, 8vw, 5.5rem) clamp(1rem, 4vw, 2.5rem); }
+.site-page h2 { font-size: clamp(1.8rem, 4.5vw, 2.7rem); margin-bottom: 1.25rem; max-width: 22ch; }
+.site-page h3 { color: var(--navy); font-family: var(--serif); font-size: 1.3rem; font-weight: 400; margin: 0 0 .4rem; }
+.site-page ul, .site-page ol { list-style: none; margin: 0; padding: 0; }
+
+.hero { align-items: center; display: grid; gap: clamp(2rem, 6vw, 4.5rem); grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+.hero h1 { font-size: clamp(2.5rem, 7vw, 5rem); letter-spacing: -.01em; line-height: 1.03; margin-bottom: 1.5rem; }
+.hero-copy p { font-size: clamp(1.05rem, 2.2vw, 1.25rem); margin-bottom: 1.75rem; max-width: 34em; }
+.hero-image { display: block; height: auto; width: 100%; }
+.hero-art { min-height: 480px; position: relative; }
+.table-card { background: var(--card); border: 1px solid var(--gold); left: 0; outline: 1px solid var(--gold); outline-offset: -6px; padding: 1.4rem 1.2rem; position: absolute; text-align: center; top: 5%; transform: rotate(-5deg); width: 58%; }
+.table-card p { font-size: .82rem; margin: 0; }
+.table-card .table-names { color: var(--navy); font-family: var(--serif); font-size: 1.4rem; }
+.table-qr { aspect-ratio: 1; background: linear-gradient(90deg, var(--navy) 50%, transparent 0) 0 0 / 12% 12%, linear-gradient(var(--navy) 50%, transparent 0) 0 0 / 12% 12%; margin: 1rem auto 0; position: relative; width: 62%; }
+.table-qr span { background: var(--card); border: 6px solid var(--navy); height: 26%; outline: 4px solid var(--card); position: absolute; width: 26%; }
+.table-qr span:nth-child(1) { left: 0; top: 0; }
+.table-qr span:nth-child(2) { right: 0; top: 0; }
+.table-qr span:nth-child(3) { bottom: 0; left: 0; }
+.phone { background: var(--navy); border-radius: 30px; bottom: 0; padding: 10px; position: absolute; right: 0; transform: rotate(3deg); width: 58%; }
+.phone-screen { background: var(--card); border-radius: 22px; min-height: 400px; padding: 2.2rem 1rem 1rem; position: relative; }
+.phone-title { color: var(--navy); font-family: var(--serif); font-size: 1.25rem; margin-bottom: .6rem; }
+.phone-screen li { border-top: 1px solid var(--line); display: flex; font-size: .78rem; gap: .5rem; justify-content: space-between; padding: .6rem 0; }
+.phone-screen b { color: var(--gold-text); }
+.phone-winner { background: var(--navy); color: #e6c878; font-family: var(--serif); font-size: 1.5rem; letter-spacing: .12em; margin-top: 1.25rem; padding: .85rem; text-align: center; }
+
+.about { border-top: 1px solid var(--line); display: grid; gap: 1rem 3rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.about p { font-size: 1.12rem; max-width: 36em; }
+
+.steps ol { counter-reset: step; display: grid; gap: 2rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.steps li { border-top: 2px solid var(--gold); counter-increment: step; padding-top: .75rem; }
+.steps li::before { color: var(--gold-text); content: counter(step); display: block; font-family: var(--serif); font-size: 2.2rem; margin-bottom: .4rem; }
+
+.site-gallery ul { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.site-gallery figure { margin: 0; }
+.site-gallery img { aspect-ratio: 4 / 3; display: block; height: auto; object-fit: cover; width: 100%; }
+.site-gallery figcaption { font-size: .9rem; margin-top: .4rem; }
+
+.testimonials ul { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.testimonials blockquote { background: var(--card); border-left: 3px solid var(--gold); margin: 0; padding: 1.5rem; }
+.testimonials img { border-radius: 50%; display: block; height: 64px; margin-bottom: .75rem; object-fit: cover; width: 64px; }
+.testimonials blockquote p { font-family: var(--serif); font-size: 1.15rem; }
+.testimonials footer { display: grid; font-size: .92rem; }
+
+.site-page main > .packs { background: var(--navy); color: #fff; max-width: none; padding-inline: max(clamp(1rem, 4vw, 2.5rem), calc((100% - 1100px) / 2)); }
+.packs h2 { color: #fff; }
+.pack-list { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-top: 2rem; }
+.pack { background: var(--card); color: var(--ink); display: flex; flex-direction: column; padding: 1.5rem 1.25rem; }
+.pack-highlight { outline: 3px solid var(--gold); }
+.pack-guests { color: var(--ink-soft); margin: 0; }
+.pack-price { color: var(--navy); font-family: var(--serif); font-size: 1.9rem; margin: .75rem 0 1rem; }
+.pack ul { display: grid; flex: 1; gap: .55rem; margin-bottom: 1.25rem; }
+.pack ul li { border-top: 1px solid var(--line); font-size: .94rem; padding-top: .5rem; }
+
+.ads ul { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.ads li > a { color: inherit; display: block; text-decoration: none; }
+.ads img { display: block; height: auto; margin-bottom: .6rem; width: 100%; }
+
+.support { display: grid; gap: 2rem 4rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.support textarea { background: var(--card); border: 1px solid #a99f8c; border-radius: 3px; font: inherit; padding: .55rem .7rem; width: 100%; }
+.site-trap { height: 1px; left: -9999px; overflow: hidden; position: absolute; width: 1px; }
+.site-footer { align-items: center; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: .5rem 2rem; justify-content: space-between; margin: 0 auto; max-width: 1180px; padding: 1.5rem clamp(1rem, 4vw, 2.5rem); }
+.site-footer p { margin: 0; }
+
+@media (max-width: 820px) {
+  .hero, .about, .support { grid-template-columns: minmax(0, 1fr); }
+  .hero-art { min-height: 440px; }
+  .table-card { width: 62%; }
+  .phone { width: 62%; }
+  .site-header nav a:not(.site-login) { font-size: .92rem; }
+}

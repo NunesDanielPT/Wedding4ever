@@ -1,18 +1,8 @@
-import { applyEventStatus, EVENT_STATUSES, eventDesign, getEventBySlug, getEventStats, listGuests, listMissions, type EventRecord, type EventStatus } from "../db/events";
+import { eventDesign, getEventBySlug, listMissions, type EventRecord } from "../db/events";
 import { themeCss } from "../lib/design";
-import { cardsPdfResponse, mediaPath, qrPngResponse, qrSvgResponse } from "../lib/event-assets";
-import {
-  coupleCookie,
-  currentGuest,
-  type Guest,
-  guestCookie,
-  isCoupleAuthenticated,
-  isCoupleLocked,
-  joinGuest,
-  loginCouple,
-  logoutCouple,
-} from "../lib/event-auth";
-import { listAdminMissions, MISSION_PHASES, setMissionPhase, type MissionPhase } from "../lib/missions";
+import { mediaPath } from "../lib/event-assets";
+import { currentGuest, guestCookie, joinGuest, type Guest } from "../lib/event-auth";
+import { getWinners } from "../lib/missions";
 import {
   canViewPhoto,
   countGuestPhotos,
@@ -30,79 +20,15 @@ import {
   votePhoto,
   type MissionDetail,
 } from "../lib/photos";
-import { coupleLoginPage, couplePanelPage, guestHomePage, joinPage, missionPage } from "../views/public";
+import { guestHomePage, joinPage, missionPage } from "../views/public";
+import { winnersPage } from "../views/winners";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./http";
-
-const COUPLE_STATUSES = EVENT_STATUSES.filter((status) => status !== "arquivado");
-
-async function couplePanel(event: EventRecord, error?: string, status = 200): Promise<Response> {
-  const [stats, guests, missions] = await Promise.all([
-    getEventStats(event.db_name),
-    listGuests(event.db_name),
-    listAdminMissions(event.db_name),
-  ]).catch(() => [null, [], []] as const);
-  return htmlResponse(couplePanelPage(event, stats, [...guests], [...missions], error), status);
-}
-
-async function handleCouple(req: Request, event: EventRecord, action: string): Promise<Response> {
-  const base = `/e/${event.slug}/noivos`;
-
-  if (action === "entrar" && req.method === "POST") {
-    if (isCoupleLocked(event)) {
-      const page = coupleLoginPage(event, "Demasiadas tentativas. Tenta novamente daqui a 15 minutos.", 429);
-      return htmlResponse(page.body, page.status);
-    }
-    const form = await req.formData();
-    const token = await loginCouple(event, field(form, "email"), field(form, "code"));
-    if (!token) {
-      const page = coupleLoginPage(event, "O e-mail ou o código estão incorretos.", 401);
-      return htmlResponse(page.body, page.status);
-    }
-    return redirect(base, { "Set-Cookie": coupleCookie(event.slug, token) });
-  }
-
-  const authenticated = await isCoupleAuthenticated(req, event);
-  if (!authenticated) {
-    if (req.method !== "GET") return new Response(null, { status: 401 });
-    if (action) return redirect(base);
-    const page = coupleLoginPage(event);
-    return htmlResponse(page.body, page.status);
-  }
-
-  if (!action && req.method === "GET") return couplePanel(event);
-  if (action === "qr.svg" && req.method === "GET") return qrSvgResponse(event);
-  if (action === "qr.png" && req.method === "GET") return qrPngResponse(event);
-  if (action === "cartoes.pdf" && req.method === "GET") return cardsPdfResponse(event);
-
-  if (action === "estado" && req.method === "POST") {
-    const status = field(await req.formData(), "status") as EventStatus;
-    if (event.status === "arquivado" || !COUPLE_STATUSES.includes(status)) {
-      return couplePanel(event, "Não é possível aplicar esse estado.", 422);
-    }
-    await applyEventStatus(event, status);
-    return redirect(base);
-  }
-
-  const phaseRoute = action.match(/^missoes\/([0-9a-f-]{36})\/fase$/);
-  if (phaseRoute && req.method === "POST") {
-    const phase = field(await req.formData(), "phase") as MissionPhase;
-    const mission = await getMission(event.db_name, phaseRoute[1]!);
-    if (!mission || !MISSION_PHASES.includes(phase)) return couplePanel(event, "Escolhe uma fase válida.", 422);
-    await setMissionPhase(event.db_name, mission.id, phase);
-    return redirect(base);
-  }
-
-  if (action === "sair" && req.method === "POST") {
-    await logoutCouple(req);
-    return redirect(base, { "Set-Cookie": coupleCookie(event.slug, null) });
-  }
-  return notFound();
-}
 
 async function guestHome(req: Request, event: EventRecord): Promise<Response> {
   const guest = await currentGuest(req, event);
   if (!guest) return htmlResponse(joinPage(event));
-  return htmlResponse(guestHomePage(event, guest, await listMissions(event.db_name, guest.id)));
+  const [missions, winners] = await Promise.all([listMissions(event.db_name, guest.id), getWinners(event.db_name)]);
+  return htmlResponse(guestHomePage(event, guest, missions, winners.length > 0));
 }
 
 function isPlaying(event: EventRecord): boolean {
@@ -223,8 +149,12 @@ export async function handleEvent(req: Request, path: string): Promise<Response 
   const photoResponse = await handlePhotos(req, event, action);
   if (photoResponse) return photoResponse;
 
-  if (action === "noivos" || action.startsWith("noivos/")) {
-    return handleCouple(req, event, action.slice("noivos/".length));
+  if (action === "vencedores" && req.method === "GET") {
+    const guest = await currentGuest(req, event);
+    if (!guest || !isPlaying(event)) return redirect(`/e/${event.slug}`);
+    return htmlResponse(winnersPage(event, await getWinners(event.db_name), `/e/${event.slug}/fotos`, `/e/${event.slug}`));
   }
+
+  if (action === "noivos" || action.startsWith("noivos/")) return redirect("/entrar");
   return notFound();
 }

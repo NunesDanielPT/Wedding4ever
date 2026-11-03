@@ -1,5 +1,5 @@
 import { eventDb, type EventRecord } from "../db/events";
-import { removePhotoFiles } from "./photos";
+import { removePhotoFiles, type PhotoExtension } from "./photos";
 
 export const MISSION_PHASES = ["envio", "votacao", "encerrada"] as const;
 export type MissionPhase = (typeof MISSION_PHASES)[number];
@@ -95,3 +95,61 @@ export async function deleteMission(event: EventRecord, id: string): Promise<voi
   await Promise.all(photos.map((photo) => removePhotoFiles(event.id, photo.id, photo.extension)));
 }
 
+
+export interface WinnerPhoto {
+  id: string;
+  guest_name: string;
+  caption: string;
+  votes: number;
+}
+
+export interface MissionWinners {
+  id: string;
+  title: string;
+  photos: WinnerPhoto[];
+}
+
+/** Devolve as mais votadas de cada missão encerrada; num empate ficam todas. */
+export async function getWinners(dbName: string): Promise<MissionWinners[]> {
+  const rows: (WinnerPhoto & { mission_id: string; title: string })[] = await eventDb(dbName)`
+    SELECT mission_id, title, id, guest_name, caption, votes FROM (
+      SELECT m.id AS mission_id, m.title, m.position, p.id, g.full_name AS guest_name, p.caption,
+             count(v.photo_id)::int AS votes,
+             rank() OVER (PARTITION BY m.id ORDER BY count(v.photo_id) DESC) AS place
+      FROM missions m
+      JOIN photos p ON p.mission_id = m.id AND NOT p.hidden AND p.preview_status = 'ready'
+      JOIN guests g ON g.id = p.guest_id
+      LEFT JOIN votes v ON v.photo_id = p.id
+      WHERE m.phase = 'encerrada'
+      GROUP BY m.id, p.id, g.full_name
+    ) ranked
+    WHERE place = 1 AND votes > 0
+    ORDER BY position, id
+  `;
+  const missions = new Map<string, MissionWinners>();
+  for (const { mission_id, title, ...photo } of rows) {
+    const mission = missions.get(mission_id) ?? { id: mission_id, title, photos: [] };
+    mission.photos.push(photo);
+    missions.set(mission_id, mission);
+  }
+  return [...missions.values()];
+}
+
+export interface AlbumPhoto {
+  id: string;
+  mission_title: string;
+  mission_position: number;
+  guest_name: string;
+  caption: string;
+  extension: PhotoExtension;
+  preview_status: "pending" | "ready" | "failed";
+}
+
+export async function listAlbum(dbName: string): Promise<AlbumPhoto[]> {
+  return eventDb(dbName)`
+    SELECT p.id, m.title AS mission_title, m.position AS mission_position, g.full_name AS guest_name,
+           p.caption, p.extension, p.preview_status
+    FROM photos p JOIN missions m ON m.id = p.mission_id JOIN guests g ON g.id = p.guest_id
+    WHERE NOT p.hidden ORDER BY m.position, m.created_at, p.created_at
+  `;
+}

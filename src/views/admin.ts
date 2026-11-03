@@ -16,12 +16,14 @@ export const STATUS_LABELS: Record<EventStatus, string> = {
   arquivado: "Arquivado",
 };
 
-function shell(title: string, content: Html, stylesheet?: string): string {
+export function shell(title: string, content: Html, stylesheet?: string): string {
   return page(`${title} | Wedding4Ever`, html`
     <header class="topbar">
       <a class="brand" href="/admin">${rings}<span>Wedding4Ever</span></a>
       <nav class="topnav">
         <a href="/admin">Clientes</a>
+        <a href="/admin/site">Site</a>
+        <a href="/admin/mensagens">Mensagens</a>
         <a href="/admin/definicoes">Definições</a>
         <form method="post" action="/admin/sair"><button class="link-button">Sair</button></form>
       </nav>
@@ -44,12 +46,13 @@ export function loginPage(error?: string): string {
   `);
 }
 
-export function dashboardPage(events: EventRecord[]): string {
+export function dashboardPage(events: EventRecord[], unread = 0): string {
   return shell("Clientes", html`
     <div class="page-head">
       <h1>Clientes</h1>
       <a class="primary" href="/admin/clientes/novo">Criar cliente</a>
     </div>
+    ${unread > 0 && html`<p class="notice"><a href="/admin/mensagens">${unread === 1 ? "Tens 1 mensagem por ler." : `Tens ${unread} mensagens por ler.`}</a></p>`}
     ${events.length === 0
       ? html`<div class="empty"><p>Ainda não tens clientes. Cria o primeiro para gerar o link, o QR Code e a base de dados do evento.</p></div>`
       : html`<ul class="client-list">
@@ -132,13 +135,13 @@ export function eventPage(
           <p class="downloads">
             <a href="/admin/clientes/${event.id}/missoes">Missões, fases e fotografias por missão</a>
             <a href="/admin/clientes/${event.id}/personalizar">Personalizar cartões e página</a>
+            <a href="/cliente/eventos/${event.id}">Abrir a área deste cliente</a>
           </p>
         </section>
 
         <section>
-          <h2>Acesso dos noivos</h2>
-          <input class="copy-field" readonly value="${url}/noivos" aria-label="Link dos noivos">
-          <p>Entram com ${event.couple_email} e um código de acesso.</p>
+          <h2>Acesso do cliente</h2>
+          <p>O cliente entra em <strong>Área de cliente</strong>, no site, com ${event.couple_email} e um código de acesso. Eventos com o mesmo e-mail ficam juntos, o que é útil para produtoras.</p>
           ${coupleCode && html`<p class="notice" role="status">Código de acesso: <strong>${coupleCode}</strong><br>Guarda-o agora. Não volta a ser mostrado.</p>`}
           <form method="post" action="/admin/clientes/${event.id}/codigo-noivos">
             <button>${event.has_couple_code || coupleCode ? "Gerar novo código" : "Gerar código de acesso"}</button>
@@ -196,11 +199,20 @@ function colorField(label: string, name: string, value: string): Html {
   return html`<label>${label}<input type="color" name="${name}" value="${value}"></label>`;
 }
 
-export function designPage(event: EventRecord, design: Design, error?: string): string {
+export interface DesignContext {
+  base: string;
+  back: string;
+  wrap?: (title: string, content: Html, stylesheet: string) => string;
+}
+
+export function designPage(event: EventRecord, design: Design, error?: string, context?: DesignContext): string {
+  const base = context?.base ?? `/admin/clientes/${event.id}`;
+  const back = context?.back ?? `/admin/clientes/${event.id}`;
+  const wrap = context?.wrap ?? shell;
   const couple = coupleNames(event.partner_one, event.partner_two);
   const mediaBase = `/e/${event.slug}/media`;
-  return shell(`Personalizar ${couple}`, html`
-    <a class="back" href="/admin/clientes/${event.id}">Voltar a ${couple}</a>
+  return wrap(`Personalizar ${couple}`, html`
+    <a class="back" href="${back}">Voltar a ${couple}</a>
     <h1>Personalizar</h1>
     <p class="lead">Estas opções mudam os cartões em PDF, o QR Code e a página dos convidados.</p>
     ${error && html`<p class="error" role="alert">${error}</p>`}
@@ -210,11 +222,11 @@ export function designPage(event: EventRecord, design: Design, error?: string): 
         <h2>${couple}</h2>
         <p>${formatDate(event.event_date)}</p>
         <p class="design-headline">${design.headline}</p>
-        <img class="design-qr" src="/admin/clientes/${event.id}/qr.svg" alt="QR Code do evento" width="200" height="200">
+        <img class="design-qr" src="${base}/qr.svg" alt="QR Code do evento" width="200" height="200">
         <p>${design.instructions}</p>
       </section>
 
-      <form method="post" action="/admin/clientes/${event.id}/personalizar" enctype="multipart/form-data" class="stack">
+      <form method="post" action="${base}/personalizar" enctype="multipart/form-data" class="stack">
         <label>Título<input name="headline" maxlength="60" required value="${design.headline}"></label>
         <label>Instrução para os convidados<input name="instructions" maxlength="120" required value="${design.instructions}"></label>
 
@@ -242,9 +254,9 @@ export function designPage(event: EventRecord, design: Design, error?: string): 
       </form>
     </div>
     <p class="card-actions design-actions">
-      <a href="/admin/clientes/${event.id}/cartoes.pdf">Descarregar cartões em PDF</a>
-      <a href="/admin/clientes/${event.id}/qr.png">Descarregar QR Code em PNG</a>
-      <a href="/admin/clientes/${event.id}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
+      <a href="${base}/cartoes.pdf">Descarregar cartões em PDF</a>
+      <a href="${base}/qr.png">Descarregar QR Code em PNG</a>
+      <a href="${base}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
     </p>
   `, `/e/${event.slug}/tema.css`);
 }

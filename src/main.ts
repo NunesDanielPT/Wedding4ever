@@ -12,7 +12,7 @@ await migrate(central, "central");
 await ensureFirstAdmin();
 await migrateAllEvents();
 
-const server = Bun.serve({ port: config.port, fetch: handle, maxRequestBodySize: 30 * 1024 * 1024 });
+const server = Bun.serve({ port: config.port, fetch: handle, idleTimeout: 120, maxRequestBodySize: 30 * 1024 * 1024 });
 console.log(`Wedding4Ever a correr na porta ${server.port}`);
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
