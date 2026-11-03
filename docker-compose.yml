@@ -3,7 +3,6 @@ services:
   app:
     build: .
     pull_policy: build
-    image: wedding4ever:local
     restart: unless-stopped
     depends_on:
       postgres:
