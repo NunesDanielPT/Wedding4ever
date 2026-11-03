@@ -62,8 +62,8 @@ function monthChart(title: string, months: MonthRow[], key: keyof MonthRow): Htm
   return html`
     <figure class="stat-chart">
       <figcaption>${title}</figcaption>
-      <svg viewBox="0 0 336 120" role="img" aria-label="${title} por mês">
-        <line class="chart-base" x1="0" x2="336" y1="${plot}" y2="${plot}"></line>
+      <svg width="100%" viewBox="0 0 336 120" role="img" aria-label="${title} por mês">
+        <line class="chart-base" stroke="#a99f8c" x1="0" x2="336" y1="${plot}" y2="${plot}"></line>
         ${months.map((month, index) => {
           const value = month[key];
           const height = value === 0 ? 0 : Math.max((value / max) * (plot - 14), 3);
@@ -71,10 +71,10 @@ function monthChart(title: string, months: MonthRow[], key: keyof MonthRow): Htm
           return html`
             <g class="chart-bar">
               <title>${MONTHS[index]}: ${number.format(value)}</title>
-              <rect class="chart-hit" x="${x - 2}" y="0" width="${slot}" height="${plot + 20}"></rect>
-              ${value > 0 && html`<rect class="chart-mark" x="${x}" y="${plot - height}" width="${slot - 8}" height="${height}" rx="3"></rect>`}
-              ${value === max && value > 0 && html`<text class="chart-value" x="${x + (slot - 8) / 2}" y="${plot - height - 3}">${number.format(value)}</text>`}
-              <text class="chart-label" x="${x + (slot - 8) / 2}" y="112">${MONTHS[index]}</text>
+              <rect class="chart-hit" fill="transparent" x="${x - 2}" y="0" width="${slot}" height="${plot + 20}"></rect>
+              ${value > 0 && html`<rect class="chart-mark" fill="#1f3350" x="${x}" y="${plot - height}" width="${slot - 8}" height="${height}" rx="3"></rect>`}
+              ${value === max && value > 0 && html`<text class="chart-value" fill="#33373b" font-size="9" text-anchor="middle" x="${x + (slot - 8) / 2}" y="${plot - height - 3}">${number.format(value)}</text>`}
+              <text class="chart-label" fill="#5e6063" font-size="9" text-anchor="middle" x="${x + (slot - 8) / 2}" y="112">${MONTHS[index]}</text>
             </g>`;
         })}
       </svg>

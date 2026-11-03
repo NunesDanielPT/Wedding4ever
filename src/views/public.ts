@@ -1,3 +1,4 @@
+import { asset } from "../lib/assets";
 import { STATUS_LABELS } from "./admin";
 import { eventDesign, type EventRecord, type EventStatus, type Mission } from "../db/events";
 import { formatDate, initials } from "../lib/format";
@@ -138,7 +139,7 @@ function gallery(event: EventRecord, guest: Guest, mission: MissionDetail, photo
           </figure>`)}
       </div>
     </div>
-    <script src="/static/gallery.js" defer></script>
+    <script src="${asset("gallery.js")}" defer></script>
   `;
 }
 
@@ -173,7 +174,7 @@ export function missionPage(
         <h2>As tuas fotografias</h2>
         <p class="hint">As fotografias dos outros convidados aparecem quando a votação abrir.</p>
         ${ownPhotos(event, photos)}
-        <script src="/static/gallery.js" defer></script>`}
+        <script src="${asset("gallery.js")}" defer></script>`}
 
       ${mission.phase === "votacao" && html`
         <p>Abre as fotografias, desliza para o lado e vota na tua favorita. Podes mudar de voto enquanto a votação estiver aberta.</p>

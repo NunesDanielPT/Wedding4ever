@@ -1,3 +1,4 @@
+import { asset } from "../lib/assets";
 import { brand } from "../lib/brand";
 import { EVENT_STATUSES, type EventRecord, type EventStats, type EventStatus, type RegisteredGuest } from "../db/events";
 import type { Admin } from "../lib/auth";
@@ -368,7 +369,7 @@ export function designPage(event: EventRecord, design: Design, error?: string, c
       <a href="${base}/qr.png">Descarregar QR Code em PNG</a>
       <a href="${base}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
     </p>
-    <script src="/static/design.js" defer></script>
+    <script src="${asset("design.js")}" defer></script>
   `, `/e/${event.slug}/tema.css`);
 }
 

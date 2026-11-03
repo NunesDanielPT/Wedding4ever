@@ -1,3 +1,4 @@
+import { asset } from "../lib/assets";
 import { brand } from "../lib/brand";
 import type { EventRecord, EventStats, RegisteredGuest } from "../db/events";
 import { EVENT_STATUSES } from "../db/events";
@@ -198,6 +199,6 @@ export function clientGalleryPage(event: EventRecord, album: AlbumPhoto[]): stri
             </figure>`)}
         </div>
       </div>
-      <script src="/static/gallery.js" defer></script>`}
+      <script src="${asset("gallery.js")}" defer></script>`}
   `);
 }

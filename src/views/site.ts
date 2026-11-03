@@ -1,3 +1,4 @@
+import { asset } from "../lib/assets";
 import { brand } from "../lib/brand";
 import { html, type Html } from "../lib/html";
 import type { Site, SiteItem } from "../lib/site";
@@ -132,5 +133,5 @@ export function sitePage(site: Site, state: SiteState = {}): string {
       <p>${t.footerText}</p>
       <a href="/entrar">Área de cliente</a>
     </footer>
-  `, "site-page", "/static/site.css", t.heroSubtitle);
+  `, "site-page", asset("site.css"), t.heroSubtitle);
 }

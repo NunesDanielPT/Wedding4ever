@@ -994,3 +994,12 @@ describe("estatísticas", () => {
     expect((await get("/admin/estatisticas", false)).status).toBe(303);
   });
 });
+
+describe("ficheiros estáticos", () => {
+  test("os links mudam com o conteúdo e continuam a abrir", async () => {
+    const body = await (await get("/", false)).text();
+    const link = body.match(/\/static\/style\.css\?v=[0-9a-f]{10}/)![0];
+    expect((await get(link, false)).status).toBe(200);
+    expect(body).toMatch(/\/static\/site\.css\?v=[0-9a-f]{10}/);
+  });
+});
