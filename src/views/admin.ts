@@ -1,11 +1,14 @@
+import { brand } from "../lib/brand";
 import { EVENT_STATUSES, type EventRecord, type EventStats, type EventStatus, type RegisteredGuest } from "../db/events";
 import type { Admin } from "../lib/auth";
 import type { Design } from "../lib/design";
 import { eventUrl } from "../lib/event-assets";
-import { coupleNames, formatDate, initial } from "../lib/format";
+import { formatDate, initials } from "../lib/format";
 import { html, Html } from "../lib/html";
 import type { SiteItem } from "../lib/site";
-import { MAX_TITLE_LENGTH, MISSION_PHASES, MISSION_SUGGESTIONS, PHASE_LABELS, type AdminMission } from "../lib/missions";
+import { MAX_TITLE_LENGTH, MISSION_PHASES, PHASE_LABELS, type AdminMission } from "../lib/missions";
+import { EVENT_TYPE_IDS, EVENT_TYPES } from "../lib/event-types";
+import { BORDERS, COLOR_PRESETS, FONTS, QR_SIZES } from "../lib/design";
 import { MAX_PHOTO_LIMIT, MIN_PHOTO_LIMIT, type PlatformSettings } from "../lib/settings";
 import { guestTable } from "./guests";
 import { page, rings } from "./layout";
@@ -19,11 +22,13 @@ export const STATUS_LABELS: Record<EventStatus, string> = {
 };
 
 export function shell(title: string, content: Html, stylesheet?: string): string {
-  return page(`${title} | Wedding4Ever`, html`
+  return page(`${title} | ${brand()}`, html`
     <header class="topbar">
-      <a class="brand" href="/admin">${rings}<span>Wedding4Ever</span></a>
+      <a class="brand" href="/admin">${rings}<span>${brand()}</span></a>
       <nav class="topnav">
-        <a href="/admin">Clientes</a>
+        <a href="/admin">Eventos</a>
+        <a href="/admin/organizadores">Organizadores</a>
+        <a href="/admin/estatisticas">Estatísticas</a>
         <a href="/admin/site">Site</a>
         <a href="/admin/mensagens">Mensagens</a>
         <a href="/admin/definicoes">Definições</a>
@@ -35,9 +40,9 @@ export function shell(title: string, content: Html, stylesheet?: string): string
 }
 
 export function loginPage(error?: string): string {
-  return page("Entrar | Wedding4Ever", html`
+  return page(`Entrar | ${brand()}`, html`
     <main class="login">
-      <div class="brand brand-large">${rings}<span>Wedding4Ever</span></div>
+      <div class="brand brand-large">${rings}<span>${brand()}</span></div>
       <form method="post" action="/admin/entrar" class="stack">
         ${error && html`<p class="error" role="alert">${error}</p>`}
         <label>E-mail<input type="email" name="email" autocomplete="username" required autofocus></label>
@@ -49,21 +54,21 @@ export function loginPage(error?: string): string {
 }
 
 export function dashboardPage(events: EventRecord[], unread = 0): string {
-  return shell("Clientes", html`
+  return shell("Eventos", html`
     <div class="page-head">
-      <h1>Clientes</h1>
-      <a class="primary" href="/admin/clientes/novo">Criar cliente</a>
+      <h1>Eventos</h1>
+      <a class="primary" href="/admin/clientes/novo">Criar evento</a>
     </div>
     ${unread > 0 && html`<p class="notice"><a href="/admin/mensagens">${unread === 1 ? "Tens 1 mensagem por ler." : `Tens ${unread} mensagens por ler.`}</a></p>`}
     ${events.length === 0
-      ? html`<div class="empty"><p>Ainda não tens clientes. Cria o primeiro para gerar o link, o QR Code e a base de dados do evento.</p></div>`
+      ? html`<div class="empty"><p>Ainda não tens eventos. Cria o primeiro para gerar o link, o QR Code e a base de dados.</p></div>`
       : html`<ul class="client-list">
           ${events.map((event) => html`
             <li>
               <a href="/admin/clientes/${event.id}">
-                <span class="monogram" aria-hidden="true">${initial(event.partner_one)}${initial(event.partner_two)}</span>
-                <span class="client-name">${coupleNames(event.partner_one, event.partner_two)}</span>
-                <span class="client-date">${formatDate(event.event_date)}</span>
+                <span class="monogram" aria-hidden="true">${initials(event.name)}</span>
+                <span class="client-name">${event.name}</span>
+                <span class="client-date">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}</span>
                 <span class="status status-${event.status}">${STATUS_LABELS[event.status]}</span>
               </a>
             </li>`)}
@@ -72,12 +77,20 @@ export function dashboardPage(events: EventRecord[], unread = 0): string {
 }
 
 export interface EventForm {
-  partnerOne?: string;
-  partnerTwo?: string;
+  name?: string;
+  eventType?: string;
   eventDate?: string;
   venue?: string;
   coupleEmail?: string;
   packId?: string;
+  organizerId?: string;
+}
+
+export interface EventFormContext {
+  action: string;
+  back: string;
+  wrap?: (title: string, content: Html, stylesheet?: string) => string;
+  organizers?: { id: string; name: string }[];
 }
 
 function packLabel(pack: SiteItem): string {
@@ -85,27 +98,44 @@ function packLabel(pack: SiteItem): string {
   return `${pack.name} (${pack.guests})${price}`;
 }
 
-export function newEventPage(packs: SiteItem[], values: EventForm = {}, error?: string): string {
-  return shell("Criar cliente", html`
-    <a class="back" href="/admin">Voltar aos clientes</a>
-    <h1>Criar cliente</h1>
-    <p class="lead">Ao guardar, o evento recebe uma base de dados só sua, um link e um QR Code.</p>
-    <form method="post" action="/admin/clientes" class="stack narrow">
+export function newEventPage(packs: SiteItem[], values: EventForm = {}, error?: string, context?: EventFormContext): string {
+  const wrap = context?.wrap ?? shell;
+  const selectedType = values.eventType && values.eventType in EVENT_TYPES ? (values.eventType as keyof typeof EVENT_TYPES) : "casamento";
+  return wrap("Criar evento", html`
+    <a class="back" href="${context?.back ?? "/admin"}">Voltar aos eventos</a>
+    <h1>Criar evento</h1>
+    <p class="lead">Ao guardar, o evento recebe uma base de dados só sua, um link, um QR Code e missões adequadas ao tipo escolhido.</p>
+    <form method="post" action="${context?.action ?? "/admin/clientes"}" class="stack narrow">
       ${error && html`<p class="error" role="alert">${error}</p>`}
-      <div class="pair">
-        <label>Nome do primeiro noivo<input name="partnerOne" maxlength="60" required value="${values.partnerOne ?? ""}"></label>
-        <label>Nome do segundo noivo<input name="partnerTwo" maxlength="60" required value="${values.partnerTwo ?? ""}"></label>
-      </div>
-      <label>Data do casamento<input type="date" name="eventDate" required value="${values.eventDate ?? ""}"></label>
+      <label>Tipo de evento
+        <select name="eventType" required>
+          ${EVENT_TYPE_IDS.map((type) => html`<option value="${type}" ${type === selectedType ? new Html("selected") : ""}>${EVENT_TYPES[type].label}</option>`)}
+        </select>
+      </label>
+      <label>Nome do evento
+        <input name="name" maxlength="100" required placeholder="${EVENT_TYPES[selectedType].namePlaceholder}" value="${values.name ?? ""}">
+        <span class="hint">Usa um nome que distinga o evento de outros, com o local ou o ano se for preciso.</span>
+      </label>
+      <label>Data do evento<input type="date" name="eventDate" required value="${values.eventDate ?? ""}"></label>
       <label>Local<input name="venue" maxlength="120" value="${values.venue ?? ""}"></label>
-      <label>E-mail dos noivos<input type="email" name="coupleEmail" maxlength="160" required value="${values.coupleEmail ?? ""}"></label>
+      <label>E-mail do cliente
+        <input type="email" name="coupleEmail" maxlength="160" required value="${values.coupleEmail ?? ""}">
+        <span class="hint">Pode ser dos noivos, da família ou da produtora.</span>
+      </label>
       <label>Pack contratado
         <select name="packId">
           <option value="">Sem pack, sem limite de convidados</option>
           ${packs.map((pack) => html`<option value="${pack.id}" ${values.packId === pack.id ? new Html("selected") : ""}>${packLabel(pack)}</option>`)}
         </select>
       </label>
-      <button class="primary">Criar cliente</button>
+      ${context?.organizers && context.organizers.length > 0 && html`
+        <label>Organizador
+          <select name="organizerId">
+            <option value="">Administração</option>
+            ${context.organizers.map((organizer) => html`<option value="${organizer.id}" ${values.organizerId === organizer.id ? new Html("selected") : ""}>${organizer.name}</option>`)}
+          </select>
+        </label>`}
+      <button class="primary">Criar evento</button>
     </form>
   `);
 }
@@ -119,15 +149,15 @@ export function eventPage(
   coupleCode?: string,
 ): string {
   const url = eventUrl(event);
-  const couple = coupleNames(event.partner_one, event.partner_two);
-  return shell(couple, html`
-    <a class="back" href="/admin">Voltar aos clientes</a>
+  return shell(event.name, html`
+    <a class="back" href="/admin">Voltar aos eventos</a>
     ${error && html`<p class="error" role="alert">${error}</p>`}
     ${event.migration_error && html`<p class="error" role="alert">Esta base não ficou atualizada: ${event.migration_error}</p>`}
     <div class="event-layout">
       <section class="place-card" aria-label="Cartão de mesa">
-        <p class="card-monogram" aria-hidden="true">${initial(event.partner_one)}<span>&amp;</span>${initial(event.partner_two)}</p>
-        <h1>${couple}</h1>
+        <p class="card-monogram" aria-hidden="true">${initials(event.name)}</p>
+        <p class="type-label">${EVENT_TYPES[event.event_type].label}</p>
+        <h1>${event.name}</h1>
         <p class="card-date">${formatDate(event.event_date)}</p>
         <img src="/admin/clientes/${event.id}/qr.svg" alt="QR Code do evento" width="220" height="220">
         <p class="card-actions">
@@ -210,13 +240,13 @@ export function eventPage(
         </section>
 
         <details class="danger">
-          <summary>Apagar cliente</summary>
+          <summary>Apagar evento</summary>
           <p>Apaga a base de dados e todas as fotografias deste evento. Não é possível recuperá-las.</p>
           <form method="post" action="/admin/clientes/${event.id}/apagar" class="stack">
             <label>Escreve <strong>${event.slug}</strong> para confirmar
               <input name="confirm" autocomplete="off" required>
             </label>
-            <button class="destructive">Apagar cliente</button>
+            <button class="destructive">Apagar evento</button>
           </form>
         </details>
       </div>
@@ -236,62 +266,109 @@ function colorField(label: string, name: string, value: string): Html {
 export interface DesignContext {
   base: string;
   back: string;
-  wrap?: (title: string, content: Html, stylesheet: string) => string;
+  wrap?: (title: string, content: Html, stylesheet?: string) => string;
 }
 
-export function designPage(event: EventRecord, design: Design, error?: string, context?: DesignContext): string {
+function swatches(colors: Record<string, string>): Html {
+  return html`<svg class="swatch" viewBox="0 0 48 16" aria-hidden="true">
+    <rect width="16" height="16" fill="${colors.backgroundColor}"></rect>
+    <rect x="16" width="16" height="16" fill="${colors.accentColor}"></rect>
+    <rect x="32" width="16" height="16" fill="${colors.textColor}"></rect>
+  </svg>`;
+}
+
+function choice(name: string, label: string, options: Record<string, string>, current: string): Html {
+  return html`<label>${label}
+    <select name="${name}">
+      ${Object.entries(options).map(([value, text]) => html`<option value="${value}" ${value === current ? new Html("selected") : ""}>${text}</option>`)}
+    </select>
+  </label>`;
+}
+
+export function designPage(event: EventRecord, design: Design, error?: string, context?: DesignContext, saved = false): string {
   const base = context?.base ?? `/admin/clientes/${event.id}`;
   const back = context?.back ?? `/admin/clientes/${event.id}`;
   const wrap = context?.wrap ?? shell;
-  const couple = coupleNames(event.partner_one, event.partner_two);
   const mediaBase = `/e/${event.slug}/media`;
-  return wrap(`Personalizar ${couple}`, html`
-    <a class="back" href="${back}">Voltar a ${couple}</a>
+  const version = Date.parse(event.updated_at);
+  return wrap(`Personalizar ${event.name}`, html`
+    <a class="back" href="${back}">Voltar a ${event.name}</a>
     <h1>Personalizar</h1>
-    <p class="lead">Estas opções mudam os cartões em PDF, o QR Code e a página dos convidados.</p>
+    <p class="lead">As alterações aparecem na pré-visualização enquanto escolhes. Carrega em Guardar para as aplicares aos cartões, ao QR Code e à página dos convidados.</p>
     ${error && html`<p class="error" role="alert">${error}</p>`}
+    ${saved && html`<p class="notice" role="status">Personalização guardada.</p>`}
     <div class="event-layout design-layout">
-      <section class="design-card themed t-image" aria-label="Pré-visualização">
-        ${design.logoImage && html`<img class="design-logo" src="${mediaBase}/logo" alt="">`}
-        <h2>${couple}</h2>
-        <p>${formatDate(event.event_date)}</p>
-        <p class="design-headline">${design.headline}</p>
-        <img class="design-qr" src="${base}/qr.svg" alt="QR Code do evento" width="200" height="200">
-        <p>${design.instructions}</p>
+      <section class="design-card themed t-image" data-design-preview data-font="${design.font}" data-border="${design.borderStyle}" data-qr="${design.qrSize}" aria-label="Pré-visualização">
+        <img class="design-logo" data-preview="logo" src="${design.logoImage ? `${mediaBase}/logo?v=${version}` : ""}" alt="" ${design.logoImage ? "" : new Html("hidden")}>
+        <h2>${event.name}</h2>
+        <p data-preview="date" ${design.showDate ? "" : new Html("hidden")}>${formatDate(event.event_date)}</p>
+        <p class="design-headline" data-preview="headline">${design.headline}</p>
+        <img class="design-qr" data-preview-qr data-base="${base}/qr.svg" src="${base}/qr.svg?v=${version}" alt="QR Code do evento" width="200" height="200">
+        <p data-preview="instructions">${design.instructions}</p>
+        <p class="design-url" data-preview="url" ${design.showUrl ? "" : new Html("hidden")}>${eventUrl(event).replace(/^https?:\/\//, "")}</p>
+        <p class="design-url" data-preview="extra">${design.extraText}</p>
       </section>
 
-      <form method="post" action="${base}/personalizar" enctype="multipart/form-data" class="stack">
-        <label>Título<input name="headline" maxlength="60" required value="${design.headline}"></label>
-        <label>Instrução para os convidados<input name="instructions" maxlength="120" required value="${design.instructions}"></label>
+      <div class="stack">
+        <form method="post" action="${base}/personalizar" enctype="multipart/form-data">
+          <fieldset>
+            <legend>Esquemas de cores</legend>
+            <div class="presets">
+              ${COLOR_PRESETS.map((preset) => html`<button name="preset" value="${preset.id}">${swatches(preset.colors)}<span>${preset.label}</span></button>`)}
+            </div>
+            <button class="link-button" name="preset" value="tudo">Repor todas as opções padrão, mantendo as imagens</button>
+          </fieldset>
+        </form>
 
-        <fieldset>
-          <legend>Cores</legend>
-          <div class="color-grid">
-            ${colorField("Fundo", "backgroundColor", design.backgroundColor)}
-            ${colorField("Texto", "textColor", design.textColor)}
-            ${colorField("Destaque", "accentColor", design.accentColor)}
-            ${colorField("QR Code", "qrColor", design.qrColor)}
-            ${colorField("Fundo do QR Code", "qrBackground", design.qrBackground)}
-          </div>
-        </fieldset>
+        <form method="post" action="${base}/personalizar" enctype="multipart/form-data" class="stack" data-design-form autocomplete="off">
+          <label>Título<input name="headline" maxlength="60" required value="${design.headline}"></label>
+          <label>Instrução para os convidados<input name="instructions" maxlength="120" required value="${design.instructions}"></label>
+          <label>Texto adicional, opcional<input name="extraText" maxlength="120" value="${design.extraText}"></label>
 
-        <fieldset>
-          <legend>Imagens</legend>
-          <label>Imagem de fundo<input type="file" name="backgroundFile" accept="image/jpeg,image/png"></label>
-          ${design.backgroundImage && html`<label class="check"><input type="checkbox" name="removeBackground"> Remover a imagem de fundo</label>`}
-          <label>Logótipo<input type="file" name="logoFile" accept="image/jpeg,image/png"></label>
-          ${design.logoImage && html`<label class="check"><input type="checkbox" name="removeLogo"> Remover o logótipo</label>`}
-          <p class="hint">JPG ou PNG, até 8 MB cada.</p>
-        </fieldset>
+          <fieldset>
+            <legend>Cores</legend>
+            <div class="color-grid">
+              ${colorField("Fundo", "backgroundColor", design.backgroundColor)}
+              ${colorField("Texto", "textColor", design.textColor)}
+              ${colorField("Destaque", "accentColor", design.accentColor)}
+              ${colorField("QR Code", "qrColor", design.qrColor)}
+              ${colorField("Fundo do QR Code", "qrBackground", design.qrBackground)}
+            </div>
+          </fieldset>
 
-        <button class="primary">Guardar personalização</button>
-      </form>
+          <fieldset>
+            <legend>Estilo do cartão</legend>
+            <div class="color-grid">
+              ${choice("font", "Letra", FONTS, design.font)}
+              ${choice("borderStyle", "Moldura", BORDERS, design.borderStyle)}
+              ${choice("qrSize", "Tamanho do QR Code", QR_SIZES, design.qrSize)}
+            </div>
+            <label class="check"><input type="checkbox" name="showDate" ${design.showDate ? new Html("checked") : ""}> Mostrar a data</label>
+            <label class="check"><input type="checkbox" name="showUrl" ${design.showUrl ? new Html("checked") : ""}> Mostrar o link escrito</label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Imagens</legend>
+            <label>Imagem de fundo<input type="file" name="backgroundFile" accept="image/*,.heic,.heif"></label>
+            ${design.backgroundImage && html`<label class="check"><input type="checkbox" name="removeBackground"> Remover a imagem de fundo</label>`}
+            <label>Véu sobre a imagem, para o texto se ler melhor: <span data-overlay-value>${design.overlay}%</span>
+              <input type="range" name="overlay" min="0" max="80" step="5" value="${design.overlay}">
+            </label>
+            <label>Logótipo<input type="file" name="logoFile" accept="image/*,.heic,.heif"></label>
+            ${design.logoImage && html`<label class="check"><input type="checkbox" name="removeLogo"> Remover o logótipo</label>`}
+            <p class="hint">JPG, PNG, HEIC ou WEBP, até 20 MB cada.</p>
+          </fieldset>
+
+          <button class="primary">Guardar personalização</button>
+        </form>
+      </div>
     </div>
     <p class="card-actions design-actions">
       <a href="${base}/cartoes.pdf">Descarregar cartões em PDF</a>
       <a href="${base}/qr.png">Descarregar QR Code em PNG</a>
       <a href="${base}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
     </p>
+    <script src="/static/design.js" defer></script>
   `, `/e/${event.slug}/tema.css`);
 }
 
@@ -330,6 +407,14 @@ export function settingsPage(
     ${notice.success && html`<p class="notice" role="status">${notice.success}</p>`}
 
     <div class="settings">
+      <section>
+        <h2>Nome da plataforma</h2>
+        <form method="post" action="/admin/definicoes/marca" class="inline-form">
+          <input name="brandName" maxlength="60" required value="${settings.brandName}" aria-label="Nome da plataforma">
+          <button>Guardar nome</button>
+        </form>
+      </section>
+
       <section>
         <h2>Administradores</h2>
         <p>Estas contas entram em <strong>/admin</strong> e têm acesso a todos os clientes.</p>
@@ -388,19 +473,25 @@ export function settingsPage(
   `);
 }
 
-export function missionsPage(event: EventRecord, missions: AdminMission[], error?: string): string {
-  const couple = coupleNames(event.partner_one, event.partner_two);
-  const base = `/admin/clientes/${event.id}/missoes`;
+export interface MissionsContext {
+  base: string;
+  back: string;
+  wrap?: (title: string, content: Html, stylesheet?: string) => string;
+}
+
+export function missionsPage(event: EventRecord, missions: AdminMission[], error: string | undefined, context: MissionsContext): string {
+  const base = `${context.base}/missoes`;
+  const wrap = context.wrap ?? shell;
   const used = new Set(missions.map((mission) => mission.title.toLowerCase()));
-  const suggestions = MISSION_SUGGESTIONS.filter((title) => !used.has(title.toLowerCase()));
-  return shell(`Missões de ${couple}`, html`
-    <a class="back" href="/admin/clientes/${event.id}">Voltar a ${couple}</a>
-    <h1>Missões de ${couple}</h1>
-    <p class="lead">Cada missão tem a sua fase e o seu limite. Podes pôr uma em votação e deixar as outras para depois.</p>
+  const suggestions = EVENT_TYPES[event.event_type].suggestions.filter((title) => !used.has(title.toLowerCase()));
+  return wrap(`Missões de ${event.name}`, html`
+    <a class="back" href="${context.back}">Voltar a ${event.name}</a>
+    <h1>Missões de ${event.name}</h1>
+    <p class="lead">Cada missão tem a sua fase e o seu limite de fotografias. Podes pôr uma em votação e deixar as outras para depois.</p>
     ${error && html`<p class="error" role="alert">${error}</p>`}
 
     ${missions.length === 0
-      ? html`<div class="empty"><p>Este cliente ainda não tem missões. Escreve uma ou escolhe uma sugestão.</p></div>`
+      ? html`<div class="empty"><p>Este evento ainda não tem missões. Escreve uma ou escolhe uma sugestão.</p></div>`
       : html`<ol class="admin-missions">
           ${missions.map((mission, index) => html`
             <li>
@@ -448,7 +539,7 @@ export function missionsPage(event: EventRecord, missions: AdminMission[], error
 
     <section class="add-mission">
       <h2>Aplicar o mesmo limite a todas</h2>
-      <form method="post" action="/admin/clientes/${event.id}/limite-fotos" class="inline-form narrow-form">
+      <form method="post" action="${base}/limite" class="inline-form narrow-form">
         <input type="number" name="photoLimit" min="${MIN_PHOTO_LIMIT}" max="${MAX_PHOTO_LIMIT}" required value="${missions[0]?.photo_limit ?? 1}" aria-label="Fotografias por pessoa em todas as missões">
         <button>Aplicar a todas</button>
       </form>

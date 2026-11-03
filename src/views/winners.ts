@@ -1,5 +1,4 @@
 import type { EventRecord } from "../db/events";
-import { coupleNames } from "../lib/format";
 import { html } from "../lib/html";
 import type { MissionWinners } from "../lib/missions";
 import { page } from "./layout";
@@ -11,7 +10,7 @@ export function winnersPage(event: EventRecord, missions: MissionWinners[], phot
     <main class="winners">
       <a class="winners-back" href="${back}">Voltar</a>
       <header>
-        <p>${coupleNames(event.partner_one, event.partner_two)}</p>
+        <p>${event.name}</p>
         <h1>A melhor foto</h1>
       </header>
       ${missions.length === 0

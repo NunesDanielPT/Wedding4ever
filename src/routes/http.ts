@@ -1,7 +1,7 @@
 import { notFoundPage } from "../views/public";
 
 export function htmlResponse(body: string, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8", ...headers } });
+  return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", ...headers } });
 }
 
 export function redirect(location: string, headers: Record<string, string> = {}): Response {

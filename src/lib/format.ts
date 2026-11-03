@@ -4,10 +4,9 @@ export function formatDate(isoDate: string): string {
   return dateFormat.format(new Date(`${isoDate}T00:00:00Z`));
 }
 
-export function coupleNames(one: string, two: string): string {
-  return `${one} & ${two}`;
-}
-
-export function initial(name: string): string {
-  return [...name.trim()][0]?.toUpperCase() ?? "";
+/** Iniciais das duas primeiras palavras com significado do nome do evento. */
+export function initials(name: string): string {
+  const skip = new Set(["de", "da", "do", "das", "dos", "e", "o", "a"]);
+  const words = name.trim().split(/\s+/).filter((word) => !skip.has(word.toLowerCase()));
+  return words.slice(0, 2).map((word) => [...word][0]?.toUpperCase() ?? "").join("");
 }

@@ -1,3 +1,4 @@
+import { brand } from "../lib/brand";
 import { html, type Html } from "../lib/html";
 import type { Site, SiteItem } from "../lib/site";
 import { page, rings } from "./layout";
@@ -11,17 +12,17 @@ export interface SiteState {
 const phoneMock = html`
   <div class="hero-art" aria-hidden="true">
     <div class="table-card">
-      <p class="table-names">Ana &amp; Pedro</p>
-      <p>Batalha da Melhor Foto</p>
+      <p class="table-names">A vossa festa</p>
+      <p>Lê o código e entra</p>
       <div class="table-qr"><span></span><span></span><span></span><i></i></div>
     </div>
     <div class="phone">
       <div class="phone-screen">
         <p class="phone-title">A sua missão</p>
         <ul>
-          <li><span>Um brinde com os noivos</span><b>1/1</b></li>
+          <li><span>Um brinde à tua mesa</span><b>1/1</b></li>
           <li><span>Na pista de dança</span><b>0/1</b></li>
-          <li><span>A aliança com orgulho</span><b>Votar</b></li>
+          <li><span>A foto de grupo</span><b>Votar</b></li>
           <li><span>A melhor gargalhada</span><b>0/1</b></li>
         </ul>
         <div class="phone-winner">WINNER</div>
@@ -53,9 +54,9 @@ function packCard(item: SiteItem): Html {
 
 export function sitePage(site: Site, state: SiteState = {}): string {
   const t = site.texts;
-  return page("Wedding4Ever | Batalha da Melhor Foto", html`
+  return page(brand(), html`
     <header class="site-header">
-      <a class="brand" href="/">${rings}<span>Wedding4Ever</span></a>
+      <a class="brand" href="/">${rings}<span>${brand()}</span></a>
       <nav>
         <a href="#como-funciona">Como funciona</a>
         <a href="#packs">Packs</a>

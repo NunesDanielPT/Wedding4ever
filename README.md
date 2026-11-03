@@ -1,6 +1,6 @@
-# Wedding4Ever
+# Batalha da Melhor Foto
 
-Plataforma para a Batalha da Melhor Foto. Uma única aplicação serve todos os clientes, e cada evento tem a sua própria base de dados e o seu próprio utilizador PostgreSQL.
+Plataforma de missões fotográficas e votação para casamentos, batizados, aniversários e outros eventos. Uma única aplicação serve todos os clientes, e cada evento tem a sua própria base de dados e o seu próprio utilizador PostgreSQL.
 
 ## Estado atual
 
@@ -21,6 +21,9 @@ Já disponível:
 - Fases por missão: envio, votação e encerrada
 - Galeria em ecrã inteiro com deslize, um voto por missão e vencedora
 - Configuração do serviço de e-mail por SMTP, com envio de teste
+- Tipos de evento com missões e sugestões próprias
+- Contas de organizadores geridas em `/admin/organizadores`
+- Estatísticas em `/admin/estatisticas`
 - Migrações automáticas em todas as bases
 
 Ainda por fazer: ranking, moderação, e-mails automáticos e exportação em ZIP.

@@ -11,29 +11,6 @@ export const PHASE_LABELS: Record<MissionPhase, string> = {
   encerrada: "Encerrada",
 };
 
-export const MISSION_SUGGESTIONS = [
-  "Foto com todos da sua mesa",
-  "Beijo dos noivos",
-  "Um brinde com os noivos",
-  "Na pista de dança",
-  "Selfie com alguém de quem gostes",
-  "Um pai a enxugar uma lágrima",
-  "A aliança mostrada com orgulho",
-  "A melhor gargalhada da noite",
-  "O passo de dança mais improvável",
-  "Selfie com a pessoa que veio de mais longe",
-  "Três gerações na mesma fotografia",
-  "A criança mais divertida da festa",
-  "Os sapatos que mais sofreram na pista",
-  "O melhor penteado no fim da noite",
-  "Um abraço de amigos de sempre",
-  "A mesa mais animada",
-  "A fotografia mais criativa com o bolo",
-  "Alguém a chorar de felicidade",
-  "O momento mais romântico dos noivos",
-  "Uma foto com alguém que acabaste de conhecer",
-];
-
 export interface AdminMission {
   id: string;
   title: string;

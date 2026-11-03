@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { config } from "../config";
 import { central } from "../db/central";
 import { eventDb, type EventRecord } from "../db/events";
+import { organizerHash } from "./organizers";
 import { clearFailures, hashToken, isLoginLocked, newToken, readCookie, recordFailure } from "./auth";
 
 const SESSION_DAYS = 30;
@@ -49,7 +50,8 @@ export async function loginClient(emailInput: string, code: string): Promise<str
   const rows: { couple_code_hash: string }[] = await central`
     SELECT couple_code_hash FROM events WHERE couple_email = ${email} AND couple_code_hash IS NOT NULL
   `;
-  let valid = false;
+  const password = await organizerHash(email);
+  let valid = password ? await Bun.password.verify(code, password) : false;
   for (const row of rows) {
     if (await Bun.password.verify(normalized, row.couple_code_hash)) valid = true;
   }

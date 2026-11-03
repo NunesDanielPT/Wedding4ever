@@ -11,9 +11,10 @@ const CARD_H = PAGE_H / 2;
 const TIMES = [250,333,408,500,500,833,778,180,333,333,500,564,250,333,250,278,500,500,500,500,500,500,500,500,500,500,278,278,564,564,564,444,921,722,667,667,722,611,556,722,722,333,389,722,611,889,722,722,556,722,667,556,611,722,722,944,722,722,611,333,278,333,469,500,333,444,500,444,500,444,333,500,500,278,278,500,278,778,500,500,500,500,333,389,278,500,500,722,500,500,444,480,200,480,541];
 const HELVETICA = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
 
-type Font = "F1" | "F2";
+type Font = "F1" | "F2" | "F3";
 
 function textWidth(text: string, font: Font, size: number): number {
+  if (font === "F3") return (text.length * 600 * size) / 1000;
   const widths = font === "F1" ? TIMES : HELVETICA;
   let total = 0;
   for (const char of text.normalize("NFD").replace(/\p{Diacritic}/gu, "")) {
@@ -88,7 +89,7 @@ function containImage(name: string, image: PdfImage, cx: number, bottom: number,
 }
 
 export interface CardContent {
-  couple: string;
+  title: string;
   date: string;
   url: string;
   design: Design;
@@ -96,29 +97,45 @@ export interface CardContent {
   logo?: PdfImage;
 }
 
+const HEADING_FONT: Record<Design["font"], Font> = { classica: "F1", moderna: "F2", maquina: "F3" };
+const QR_WIDTH_MM: Record<Design["qrSize"], number> = { pequeno: 44, medio: 56, grande: 62 };
+
 function card(originX: number, originY: number, content: CardContent, qr: QrCode): string {
   const { design } = content;
   const inset = 8 * MM;
   const cx = originX + CARD_W / 2;
-  const qrWidth = 56 * MM;
+  const qrWidth = QR_WIDTH_MM[design.qrSize] * MM;
   const maxTextWidth = CARD_W - 2 * inset - 12 * MM;
   const display = content.url.replace(/^https?:\/\//, "");
   const text = color(design.textColor);
-  const headlineSize = fitSize(design.headline, "F1", 13, maxTextWidth);
-  const instructionsSize = fitSize(design.instructions, "F2", 9.5, maxTextWidth);
+  const heading = HEADING_FONT[design.font];
+  const line = (value: string, y: number, font: Font, size: number) =>
+    value ? centered(value, cx, originY + y * MM, font, fitSize(value, font, size, maxTextWidth), text) : "";
+  const rect = (grow: number) =>
+    `${(originX + inset + grow).toFixed(2)} ${(originY + inset + grow).toFixed(2)} ` +
+    `${(CARD_W - 2 * (inset + grow)).toFixed(2)} ${(CARD_H - 2 * (inset + grow)).toFixed(2)} re S\n`;
+  const border =
+    design.borderStyle === "nenhuma"
+      ? ""
+      : `${color(design.accentColor)} RG 0.75 w ${rect(0)}${design.borderStyle === "dupla" ? rect(1.8 * MM) : ""}`;
+  const overlay =
+    content.background && design.overlay > 0
+      ? `q /Veil gs ${color(design.backgroundColor)} rg ${originX.toFixed(2)} ${originY.toFixed(2)} ${CARD_W.toFixed(2)} ${CARD_H.toFixed(2)} re f Q\n`
+      : "";
 
   return (
     fillRect(originX, originY, CARD_W, CARD_H, design.backgroundColor) +
     (content.background ? coverImage("Bg", content.background, originX, originY, CARD_W, CARD_H) : "") +
-    `${color(design.accentColor)} RG 0.75 w ${(originX + inset).toFixed(2)} ${(originY + inset).toFixed(2)} ` +
-    `${(CARD_W - 2 * inset).toFixed(2)} ${(CARD_H - 2 * inset).toFixed(2)} re S\n` +
-    (content.logo ? containImage("Logo", content.logo, cx, originY + 121 * MM, 60 * MM, 16 * MM) : "") +
-    centered(content.couple, cx, originY + 110 * MM, "F1", fitSize(content.couple, "F1", 26, maxTextWidth), text) +
-    centered(content.date, cx, originY + 103 * MM, "F1", 11, text) +
-    centered(design.headline, cx, originY + 94 * MM, "F1", headlineSize, text) +
-    qrOps(qr, cx - qrWidth / 2, originY + 88 * MM, qrWidth, design) +
-    centered(design.instructions, cx, originY + 24 * MM, "F2", instructionsSize, text) +
-    centered(display, cx, originY + 18 * MM, "F2", fitSize(display, "F2", 8.5, maxTextWidth), text)
+    overlay +
+    border +
+    (content.logo ? containImage("Logo", content.logo, cx, originY + 121 * MM, 60 * MM, 15 * MM) : "") +
+    line(content.title, 110, heading, 24) +
+    (design.showDate ? line(content.date, 103, heading, 11) : "") +
+    line(design.headline, 95, heading, 13) +
+    qrOps(qr, cx - qrWidth / 2, originY + (60 + QR_WIDTH_MM[design.qrSize] / 2) * MM, qrWidth, design) +
+    line(design.instructions, 24, "F2", 9.5) +
+    (design.showUrl ? line(display, 18.5, "F2", 8.5) : "") +
+    line(design.extraText, 13, "F2", 8.5)
   );
 }
 
@@ -191,12 +208,14 @@ export function tableCardsPdf(content: CardContent): Uint8Array {
     { dict: "", data: new TextEncoder().encode(stream) },
     { dict: "/Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding" },
     { dict: "/Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding" },
+    { dict: "/Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding" },
   ];
   const xobjects: string[] = [];
   if (content.background) xobjects.push(`/Bg ${imageObjects(objects, content.background)} 0 R`);
   if (content.logo) xobjects.push(`/Logo ${imageObjects(objects, content.logo)} 0 R`);
   objects[2]!.dict =
     `/Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Contents 4 0 R ` +
-    `/Resources << /Font << /F1 5 0 R /F2 6 0 R >> /XObject << ${xobjects.join(" ")} >> >>`;
+    `/Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> /XObject << ${xobjects.join(" ")} >> ` +
+    `/ExtGState << /Veil << /ca ${(content.design.overlay / 100).toFixed(2)} >> >> >>`;
   return serialize(objects);
 }

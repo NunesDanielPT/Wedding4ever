@@ -118,7 +118,7 @@ async function handleJoin(req: Request, event: EventRecord): Promise<Response> {
     return redirect(`/e/${event.slug}`, { "Set-Cookie": guestCookie(event.slug, token) });
   } catch (cause) {
     if (cause instanceof GuestLimitError) {
-      return htmlResponse(joinPage(event, values, "Este evento já atingiu o número máximo de convidados. Fala com os noivos."), 409);
+      return htmlResponse(joinPage(event, values, "Este evento já atingiu o número máximo de convidados. Fala com a organização."), 409);
     }
     throw cause;
   }
@@ -135,7 +135,7 @@ export async function handleEvent(req: Request, path: string): Promise<Response 
   if (action === "entrar" && req.method === "POST") return handleJoin(req, event);
 
   if (action === "tema.css" && req.method === "GET") {
-    return new Response(themeCss(eventDesign(event), event.slug), {
+    return new Response(themeCss(eventDesign(event), event.slug, String(Date.parse(event.updated_at))), {
       headers: { "Content-Type": "text/css; charset=utf-8", "Cache-Control": "no-cache" },
     });
   }

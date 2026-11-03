@@ -12,7 +12,6 @@ import {
   listGuests,
   applyEventStatus,
   setEventPack,
-  setPhotoLimit,
   type EventRecord,
   type EventStatus,
 } from "./db/events";
@@ -31,19 +30,13 @@ import {
   setAdminPassword,
 } from "./lib/auth";
 import { cardsPdfResponse, qrPngResponse, qrSvgResponse } from "./lib/event-assets";
+import { readEventForm } from "./routes/event-form";
+import { handleAdminOps } from "./routes/admin-ops";
+import { handleMissions } from "./routes/missions";
+import { listOrganizers } from "./lib/organizers";
 import { generateClientCode } from "./lib/event-auth";
 import { sendMail } from "./lib/mail";
-import {
-  addMission,
-  deleteMission,
-  listAdminMissions,
-  MAX_TITLE_LENGTH,
-  MISSION_PHASES,
-  moveMission,
-  updateMission,
-  type MissionPhase,
-} from "./lib/missions";
-import { getSettings, parsePhotoLimit, saveDefaultPhotoLimit, saveEmailSettings, type SmtpSecurity } from "./lib/settings";
+import { getSettings, parsePhotoLimit, saveBrandName, saveDefaultPhotoLimit, saveEmailSettings, type SmtpSecurity } from "./lib/settings";
 import { countUnreadMessages, getSite, type SiteItem } from "./lib/site";
 import { handleSiteAdmin } from "./routes/admin-site";
 import { handleClient } from "./routes/client";
@@ -51,6 +44,7 @@ import { handleDesign } from "./routes/design";
 import { handleEvent } from "./routes/event";
 import { handleSite } from "./routes/site";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./routes/http";
+import { brand } from "./lib/brand";
 import * as admin from "./views/admin";
 
 const PUBLIC_DIR = join(import.meta.dir, "public");
@@ -58,30 +52,16 @@ const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
   "/static/favicon.svg": "favicon.svg",
   "/static/gallery.js": "gallery.js",
+  "/static/design.js": "design.js",
   "/static/site.css": "site.css",
 };
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy":
-    "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   "Referrer-Policy": "same-origin",
   "X-Content-Type-Options": "nosniff",
   "X-Robots-Tag": "noindex",
 };
-
-function isRealDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value);
-}
-
-function validateEvent(values: Required<admin.EventForm>): string | undefined {
-  if (!values.partnerOne || !values.partnerTwo) return "Preenche o nome dos dois noivos.";
-  if (values.partnerOne.length > 60 || values.partnerTwo.length > 60) return "Cada nome pode ter até 60 caracteres.";
-  if (!isRealDate(values.eventDate)) return "Indica uma data válida para o casamento.";
-  if (values.venue.length > 120) return "O local pode ter até 120 caracteres.";
-  if (!isEmail(values.coupleEmail)) return "Indica um e-mail válido para os noivos.";
-  return undefined;
-}
 
 function packGuestLimit(pack: SiteItem | undefined): number | null {
   return pack?.maxGuests ? Number(pack.maxGuests) : null;
@@ -102,54 +82,6 @@ async function eventDetail(id: string, error?: string, status = 200, coupleCode?
   return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode), status);
 }
 
-
-async function missionsPage(event: EventRecord, error?: string, status = 200): Promise<Response> {
-  return htmlResponse(admin.missionsPage(event, await listAdminMissions(event.db_name), error), status);
-}
-
-async function handleMissions(req: Request, event: EventRecord, action: string): Promise<Response> {
-  const back = redirect(`/admin/clientes/${event.id}/missoes`);
-  if (action === "missoes") {
-    if (req.method === "GET") return missionsPage(event);
-    if (req.method !== "POST") return notFound();
-    const title = field(await req.formData(), "title");
-    if (!title || title.length > MAX_TITLE_LENGTH) {
-      return missionsPage(event, `O nome da missão tem de ter entre 1 e ${MAX_TITLE_LENGTH} caracteres.`, 422);
-    }
-    await addMission(event.db_name, title, (await getSettings()).defaultPhotoLimit);
-    return back;
-  }
-
-  const match = action.match(/^missoes\/([0-9a-f-]{36})\/(guardar|subir|descer|apagar)$/);
-  if (!match || req.method !== "POST") return notFound();
-  const [, missionId, operation] = match as unknown as [string, string, string];
-
-  if (operation === "subir" || operation === "descer") {
-    await moveMission(event.db_name, missionId, operation === "subir" ? -1 : 1);
-    return back;
-  }
-  const form = await req.formData();
-  if (operation === "apagar") {
-    const mission = (await listAdminMissions(event.db_name)).find((item) => item.id === missionId);
-    if (!mission) return notFound();
-    if (mission.photos > 0 && !form.get("confirm")) {
-      return missionsPage(event, "Confirma que queres apagar a missão e as fotografias dela.", 422);
-    }
-    await deleteMission(event, missionId);
-    return back;
-  }
-
-  const title = field(form, "title");
-  const limit = parsePhotoLimit(field(form, "photoLimit"));
-  const phase = field(form, "phase") as MissionPhase;
-  if (!title || title.length > MAX_TITLE_LENGTH) {
-    return missionsPage(event, `O nome da missão tem de ter entre 1 e ${MAX_TITLE_LENGTH} caracteres.`, 422);
-  }
-  if (!limit) return missionsPage(event, "Escolhe um limite de fotografias entre 1 e 50.", 422);
-  if (!MISSION_PHASES.includes(phase)) return missionsPage(event, "Escolhe uma fase válida.", 422);
-  await updateMission(event.db_name, missionId, title, limit, phase);
-  return back;
-}
 
 function emailInput(form: FormData) {
   return {
@@ -211,6 +143,13 @@ async function handleSettings(req: Request, path: string): Promise<Response> {
   const form = await req.formData();
   if (path.startsWith("/admin/definicoes/administradores")) return handleAdmins(req, path, form);
 
+  if (path === "/admin/definicoes/marca") {
+    const name = field(form, "brandName");
+    if (name.length < 2 || name.length > 60) return settingsPage(req, { error: "O nome tem de ter entre 2 e 60 caracteres." }, 422);
+    await saveBrandName(name);
+    return settingsPage(req, { success: "Nome da plataforma guardado." });
+  }
+
   if (path === "/admin/definicoes/fotos") {
     const limit = parsePhotoLimit(field(form, "photoLimit"));
     if (!limit) return settingsPage(req, { error: "Escolhe um limite de fotografias entre 1 e 50." }, 422);
@@ -234,7 +173,7 @@ async function handleSettings(req: Request, path: string): Promise<Response> {
     try {
       await sendMail(email, {
         to,
-        subject: "Teste do Wedding4Ever",
+        subject: `Teste de ${brand()}`,
         text: "Este e-mail confirma que o serviço de e-mail está a funcionar.",
       });
       return settingsPage(req, { success: `E-mail de teste enviado para ${to}.` });
@@ -275,40 +214,43 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     return redirect("/admin/entrar", { "Set-Cookie": sessionCookie(null) });
   }
   if (path === "/admin/definicoes" || path.startsWith("/admin/definicoes/")) return handleSettings(req, path);
+  if (path === "/admin/estatisticas" || path === "/admin/organizadores" || path.startsWith("/admin/organizadores/")) {
+    return handleAdminOps(req, path);
+  }
   if (path === "/admin/site" || path.startsWith("/admin/site/") || path === "/admin/mensagens" || path.startsWith("/admin/mensagens/")) {
     return handleSiteAdmin(req, path);
   }
   if (path === "/admin" && req.method === "GET") {
     return htmlResponse(admin.dashboardPage(await listEvents(), await countUnreadMessages()));
   }
-  if (path === "/admin/clientes/novo" && req.method === "GET") return htmlResponse(admin.newEventPage((await getSite()).packs));
+  if (path === "/admin/clientes/novo" && req.method === "GET") {
+    return htmlResponse(admin.newEventPage((await getSite()).packs, {}, undefined, { action: "/admin/clientes", back: "/admin", organizers: await listOrganizers() }));
+  }
 
   if (path === "/admin/clientes" && req.method === "POST") {
     const form = await req.formData();
-    const values = {
-      partnerOne: field(form, "partnerOne"),
-      partnerTwo: field(form, "partnerTwo"),
-      eventDate: field(form, "eventDate"),
-      venue: field(form, "venue"),
-      coupleEmail: field(form, "coupleEmail").toLowerCase(),
-    };
     const { packs } = await getSite();
-    const packId = field(form, "packId");
-    const pack = packs.find((item) => item.id === packId);
-    const error = validateEvent(values) ?? (packId && !pack ? "Escolhe um pack válido." : undefined);
-    if (error) return htmlResponse(admin.newEventPage(packs, { ...values, packId }, error), 422);
+    const organizers = await listOrganizers();
+    const parsed = readEventForm(form, packs);
+    const organizerId = field(form, "organizerId");
+    const validOrganizer = !organizerId || organizers.some((item) => item.id === organizerId);
+    const context = { action: "/admin/clientes", back: "/admin", organizers };
+    const values = { ...parsed.values, packId: parsed.packId, organizerId };
+    const error = parsed.error ?? (validOrganizer ? undefined : "Escolhe um organizador válido.");
+    if (error) return htmlResponse(admin.newEventPage(packs, values, error, context), 422);
     try {
       const { defaultPhotoLimit } = await getSettings();
       const event = await createEvent({
-        ...values,
+        ...parsed.values,
+        organizerId: organizerId || null,
         photoLimit: defaultPhotoLimit,
-        packName: pack ? `${pack.name} (${pack.guests})` : "",
-        guestLimit: packGuestLimit(pack),
+        packName: parsed.packName,
+        guestLimit: parsed.guestLimit,
       });
       return redirect(`/admin/clientes/${event.id}`);
     } catch (cause) {
-      console.error("Falha ao criar cliente", cause);
-      return htmlResponse(admin.newEventPage(packs, { ...values, packId }, "Não foi possível criar o cliente. Confirma a ligação ao PostgreSQL e tenta novamente."), 500);
+      console.error("Falha ao criar evento", cause);
+      return htmlResponse(admin.newEventPage(packs, values, "Não foi possível criar o evento. Confirma a ligação ao PostgreSQL e tenta novamente.", context), 500);
     }
   }
 
@@ -321,10 +263,11 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
   if (req.method === "GET" && action && ["qr.svg", "qr.png", "cartoes.pdf", "personalizar"].includes(action)) {
     const event = await getEventById(id);
     if (!event) return notFound();
-    if (action === "qr.svg") return qrSvgResponse(event);
+    const url = new URL(req.url);
+    if (action === "qr.svg") return qrSvgResponse(event, url);
     if (action === "qr.png") return qrPngResponse(event);
     if (action === "cartoes.pdf") return cardsPdfResponse(event);
-    return htmlResponse(admin.designPage(event, eventDesign(event)));
+    return htmlResponse(admin.designPage(event, eventDesign(event), undefined, undefined, url.searchParams.has("guardado")));
   }
 
   if (action === "personalizar" && req.method === "POST") {
@@ -332,18 +275,9 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     return event ? handleDesign(req, event, { base: `/admin/clientes/${event.id}`, back: `/admin/clientes/${event.id}` }) : notFound();
   }
 
-  if (action === "limite-fotos" && req.method === "POST") {
-    const event = await getEventById(id);
-    if (!event) return notFound();
-    const limit = parsePhotoLimit(field(await req.formData(), "photoLimit"));
-    if (!limit) return eventDetail(id, "Escolhe um limite de fotografias entre 1 e 50.", 422);
-    await setPhotoLimit(event.db_name, limit);
-    return redirect(`/admin/clientes/${id}/missoes`);
-  }
-
   if (action === "missoes" || action?.startsWith("missoes/")) {
     const event = await getEventById(id);
-    return event ? handleMissions(req, event, action) : notFound();
+    return event ? handleMissions(req, event, action, { base: `/admin/clientes/${id}`, back: `/admin/clientes/${id}` }) : notFound();
   }
 
   if (action === "pack" && req.method === "POST") {

@@ -1,13 +1,13 @@
 import { STATUS_LABELS } from "./admin";
 import { eventDesign, type EventRecord, type EventStatus, type Mission } from "../db/events";
-import { coupleNames, formatDate, initial } from "../lib/format";
+import { formatDate, initials } from "../lib/format";
 import { html, Html } from "../lib/html";
 import type { Guest } from "../lib/event-auth";
 import { MAX_CAPTION_LENGTH, type MissionDetail, type Photo } from "../lib/photos";
 import { page } from "./layout";
 
 const MESSAGES: Record<EventStatus, string> = {
-  rascunho: "As missões abrem no dia do casamento. Guarda este link.",
+  rascunho: "As missões abrem no dia do evento. Guarda este link.",
   aberto: "As missões estão abertas. Escolhe uma para começar.",
   votacao: "A votação está aberta. Escolhe a tua fotografia favorita em cada missão.",
   resultados: "A batalha terminou. Abre cada missão para veres as vencedoras.",
@@ -22,8 +22,8 @@ function heading(event: EventRecord): Html {
   const design = eventDesign(event);
   return html`
     ${design.logoImage && html`<img class="guest-logo" src="/e/${event.slug}/media/logo" alt="">`}
-    ${!design.logoImage && html`<p class="card-monogram" aria-hidden="true">${initial(event.partner_one)}<span>&amp;</span>${initial(event.partner_two)}</p>`}
-    <h1>${coupleNames(event.partner_one, event.partner_two)}</h1>
+    ${!design.logoImage && html`<p class="card-monogram" aria-hidden="true">${initials(event.name)}</p>`}
+    <h1>${event.name}</h1>
     <p class="card-date">${formatDate(event.event_date)}</p>
     <p class="guest-title">${design.headline}</p>
   `;
@@ -35,7 +35,7 @@ export interface JoinValues {
 }
 
 export function joinPage(event: EventRecord, values: JoinValues = {}, error?: string): string {
-  return themed(event, coupleNames(event.partner_one, event.partner_two), html`
+  return themed(event, event.name, html`
     <main class="guest">
       ${heading(event)}
       ${event.status === "arquivado"
@@ -52,7 +52,7 @@ export function joinPage(event: EventRecord, values: JoinValues = {}, error?: st
 }
 
 export function guestHomePage(event: EventRecord, guest: Guest, missions: Mission[], hasWinners = false): string {
-  return themed(event, coupleNames(event.partner_one, event.partner_two), html`
+  return themed(event, event.name, html`
     <main class="guest">
       ${heading(event)}
       <p>Olá, ${guest.full_name}. ${MESSAGES[event.status]}</p>

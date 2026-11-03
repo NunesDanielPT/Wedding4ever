@@ -1,7 +1,7 @@
 import { deflateSync, inflateSync } from "node:zlib";
 import type { ImageExtension } from "./design";
 
-export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_PIXELS = 40_000_000;
 
 export interface PdfImage {

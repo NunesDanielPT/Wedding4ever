@@ -1,4 +1,5 @@
 import { central } from "../db/central";
+import { DEFAULT_BRAND, setBrand } from "./brand";
 import { encryptSecret } from "./secret";
 
 export type SmtpSecurity = "starttls" | "tls";
@@ -15,6 +16,7 @@ export interface EmailSettings {
 }
 
 export interface PlatformSettings {
+  brandName: string;
   defaultPhotoLimit: number;
   email: EmailSettings;
 }
@@ -23,6 +25,7 @@ export const MIN_PHOTO_LIMIT = 1;
 export const MAX_PHOTO_LIMIT = 50;
 
 const DEFAULTS: PlatformSettings = {
+  brandName: DEFAULT_BRAND,
   defaultPhotoLimit: 3,
   email: {
     enabled: false,
@@ -31,7 +34,7 @@ const DEFAULTS: PlatformSettings = {
     security: "starttls",
     username: "",
     passwordEncrypted: "",
-    fromName: "Wedding4Ever",
+    fromName: DEFAULT_BRAND,
     fromAddress: "",
   },
 };
@@ -54,6 +57,15 @@ async function saveSettings(settings: PlatformSettings): Promise<void> {
     INSERT INTO settings (key, value) VALUES ('platform', ${value}::text::jsonb)
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
   `;
+}
+
+export async function saveBrandName(name: string): Promise<void> {
+  await saveSettings({ ...(await getSettings()), brandName: name });
+  setBrand(name);
+}
+
+export async function loadBrand(): Promise<void> {
+  setBrand((await getSettings()).brandName);
 }
 
 export async function saveDefaultPhotoLimit(limit: number): Promise<void> {

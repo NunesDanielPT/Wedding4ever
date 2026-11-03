@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "../config";
 import { resolveDesign, type Design } from "../lib/design";
+import { EVENT_TYPES, type EventType } from "../lib/event-types";
 import { central } from "./central";
 import { migrate } from "./migrate";
 
@@ -13,8 +14,9 @@ export type EventStatus = (typeof EVENT_STATUSES)[number];
 export interface EventRecord {
   id: string;
   slug: string;
-  partner_one: string;
-  partner_two: string;
+  name: string;
+  event_type: EventType;
+  organizer_id: string | null;
   event_date: string;
   venue: string;
   couple_email: string;
@@ -26,11 +28,13 @@ export interface EventRecord {
   has_couple_code: boolean;
   pack_name: string;
   guest_limit: number | null;
+  updated_at: string;
 }
 
 export interface NewEvent {
-  partnerOne: string;
-  partnerTwo: string;
+  name: string;
+  eventType: EventType;
+  organizerId: string | null;
   eventDate: string;
   venue: string;
   coupleEmail: string;
@@ -39,24 +43,14 @@ export interface NewEvent {
   guestLimit: number | null;
 }
 
-export const DEFAULT_MISSIONS = [
-  "Foto com todos da sua mesa",
-  "Beijo dos noivos",
-  "Um brinde com os noivos",
-  "Na pista de dança",
-  "Selfie com alguém de quem gostes",
-  "Um pai a enxugar uma lágrima",
-  "A aliança mostrada com orgulho",
-];
-
 const SELECT_EVENT = central`
-  id, slug, partner_one, partner_two, event_date::text AS event_date, venue,
+  id, slug, name, event_type, organizer_id, event_date::text AS event_date, venue,
   couple_email, status, db_name, schema_version, migration_error, design,
-  couple_code_hash IS NOT NULL AS has_couple_code, pack_name, guest_limit
+  couple_code_hash IS NOT NULL AS has_couple_code, pack_name, guest_limit, updated_at
 `;
 const DB_NAME = /^evt_[0-9a-f]{16}$/;
 const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
-const MAX_OPEN_POOLS = 50;
+const MAX_OPEN_POOLS = 25;
 
 /** Os nomes de bases não aceitam parâmetros, por isso só passam nomes neste formato. */
 function assertDbName(name: string): string {
@@ -88,7 +82,7 @@ export function eventDb(dbName: string): SQL {
     pools.set(dbName, existing);
     return existing;
   }
-  const pool = new SQL({ ...tenantCredentials(dbName), max: 3, idleTimeout: 60 });
+  const pool = new SQL({ ...tenantCredentials(dbName), max: 2, idleTimeout: 30 });
   pools.set(dbName, pool);
   if (pools.size > MAX_OPEN_POOLS) {
     const oldest = pools.keys().next().value as string;
@@ -111,13 +105,14 @@ function slugPart(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 30);
+    .slice(0, 50)
+    .replace(/-+$/, "");
 }
 
-export function buildSlug(partnerOne: string, partnerTwo: string): string {
+export function buildSlug(name: string): string {
   let suffix = "";
   for (let i = 0; i < 6; i++) suffix += SLUG_ALPHABET[randomInt(SLUG_ALPHABET.length)];
-  return [slugPart(partnerOne), slugPart(partnerTwo), suffix].filter(Boolean).join("-");
+  return [slugPart(name), suffix].filter(Boolean).join("-");
 }
 
 async function dropEventDatabase(dbName: string): Promise<void> {
@@ -138,16 +133,16 @@ export async function createEvent(input: NewEvent): Promise<EventRecord> {
     const db = eventDb(dbName);
     const schemaVersion = await migrate(db, "event");
     await db.begin(async (tx) => {
-      for (const [position, title] of DEFAULT_MISSIONS.entries()) {
+      for (const [position, title] of EVENT_TYPES[input.eventType].missions.entries()) {
         await tx`INSERT INTO missions (title, position, photo_limit) VALUES (${title}, ${position}, ${input.photoLimit})`;
       }
     });
 
     for (let attempt = 0; attempt < 5; attempt++) {
-      const slug = buildSlug(input.partnerOne, input.partnerTwo);
+      const slug = buildSlug(input.name);
       const rows: EventRecord[] = await central`
-        INSERT INTO events (slug, partner_one, partner_two, event_date, venue, couple_email, db_name, schema_version, pack_name, guest_limit)
-        VALUES (${slug}, ${input.partnerOne}, ${input.partnerTwo}, ${input.eventDate}::date,
+        INSERT INTO events (slug, name, event_type, organizer_id, event_date, venue, couple_email, db_name, schema_version, pack_name, guest_limit)
+        VALUES (${slug}, ${input.name}, ${input.eventType}, ${input.organizerId}::uuid, ${input.eventDate}::date,
                 ${input.venue}, ${input.coupleEmail}, ${dbName}, ${schemaVersion}, ${input.packName}, ${input.guestLimit})
         ON CONFLICT (slug) DO NOTHING
         RETURNING ${SELECT_EVENT}
@@ -173,8 +168,12 @@ export async function getEventById(id: string): Promise<EventRecord | undefined>
   return rows[0];
 }
 
-export async function listEventsForClient(email: string): Promise<EventRecord[]> {
-  return central`SELECT ${SELECT_EVENT} FROM events WHERE couple_email = ${email} ORDER BY event_date DESC, created_at DESC`;
+export async function listEventsForClient(email: string, organizerId?: string): Promise<EventRecord[]> {
+  return central`
+    SELECT ${SELECT_EVENT} FROM events
+    WHERE couple_email = ${email} OR organizer_id = ${organizerId ?? null}::uuid
+    ORDER BY event_date DESC, created_at DESC
+  `;
 }
 
 export async function getEventBySlug(slug: string): Promise<EventRecord | undefined> {

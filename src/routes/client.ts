@@ -1,6 +1,8 @@
 import {
   applyEventStatus,
+  createEvent,
   EVENT_STATUSES,
+  eventDesign,
   getEventById,
   getEventStats,
   listEventsForClient,
@@ -10,15 +12,19 @@ import {
 } from "../db/events";
 import { isAuthenticated } from "../lib/auth";
 import { cardsPdfResponse, qrPngResponse, qrSvgResponse } from "../lib/event-assets";
-import { clientCookie, currentClientEmail, isClientLocked, loginClient, logoutClient } from "../lib/event-auth";
+import { clientCookie, currentClientEmail, generateClientCode, isClientLocked, loginClient, logoutClient } from "../lib/event-auth";
+import { findActiveOrganizer } from "../lib/organizers";
+import { getSettings } from "../lib/settings";
+import { getSite } from "../lib/site";
 import { getWinners, listAdminMissions, listAlbum, MISSION_PHASES, setMissionPhase, type MissionPhase } from "../lib/missions";
 import { originalPath, previewPath, schedulePreview, thumbPath } from "../lib/photos";
 import { zipStream } from "../lib/zip";
-import { clientContext, clientEventPage, clientEventsPage, clientGalleryPage, clientLoginPage } from "../views/client";
-import { designPage } from "../views/admin";
-import { eventDesign } from "../db/events";
+import { clientContext, clientEventPage, clientEventsPage, clientGalleryPage, clientLoginPage, clientShell } from "../views/client";
+import { designPage, newEventPage } from "../views/admin";
 import { winnersPage } from "../views/winners";
 import { handleDesign } from "./design";
+import { readEventForm } from "./event-form";
+import { handleMissions } from "./missions";
 import { field, htmlResponse, notFound, redirect } from "./http";
 
 const CLIENT_STATUSES = EVENT_STATUSES.filter((status) => status !== "arquivado");
@@ -41,24 +47,28 @@ async function albumZip(event: EventRecord): Promise<Response> {
   });
 }
 
-async function eventPage(event: EventRecord, status = 200, error?: string): Promise<Response> {
+async function eventPage(event: EventRecord, canManage: boolean, status = 200, error?: string, code?: string): Promise<Response> {
   const [stats, guests, missions] = await Promise.all([
     getEventStats(event.db_name),
     listGuests(event.db_name),
     listAdminMissions(event.db_name),
   ]);
-  return htmlResponse(clientEventPage(event, stats, guests, missions, error), status);
+  return htmlResponse(clientEventPage(event, stats, guests, missions, error, canManage ? { code } : undefined), status);
 }
 
-async function handleEventArea(req: Request, event: EventRecord, action: string): Promise<Response> {
+async function handleEventArea(req: Request, event: EventRecord, action: string, canManage: boolean): Promise<Response> {
   const base = `/cliente/eventos/${event.id}`;
+  if (canManage && (action === "missoes" || action.startsWith("missoes/")) && !action.endsWith("/fase")) {
+    return handleMissions(req, event, action, { base, back: base, wrap: clientShell });
+  }
   if (req.method === "GET") {
-    if (!action) return eventPage(event);
-    if (action === "qr.svg") return qrSvgResponse(event);
+    const url = new URL(req.url);
+    if (!action) return eventPage(event, canManage);
+    if (action === "qr.svg") return qrSvgResponse(event, url);
     if (action === "qr.png") return qrPngResponse(event);
     if (action === "cartoes.pdf") return cardsPdfResponse(event);
     if (action === "fotos.zip") return albumZip(event);
-    if (action === "personalizar") return htmlResponse(designPage(event, eventDesign(event), undefined, clientContext(event)));
+    if (action === "personalizar") return htmlResponse(designPage(event, eventDesign(event), undefined, clientContext(event), url.searchParams.has("guardado")));
     if (action === "vencedores") return htmlResponse(winnersPage(event, await getWinners(event.db_name), `${base}/fotos`, base));
     if (action === "galeria") {
       const album = await listAlbum(event.db_name);
@@ -82,10 +92,11 @@ async function handleEventArea(req: Request, event: EventRecord, action: string)
 
   if (req.method !== "POST") return notFound();
   if (action === "personalizar") return handleDesign(req, event, clientContext(event));
+  if (action === "codigo" && canManage) return eventPage(event, canManage, 200, undefined, await generateClientCode(event));
   if (action === "estado") {
     const status = field(await req.formData(), "status") as EventStatus;
     if (event.status === "arquivado" || !CLIENT_STATUSES.includes(status)) {
-      return eventPage(event, 422, "Não é possível aplicar esse estado.");
+      return eventPage(event, canManage, 422, "Não é possível aplicar esse estado.");
     }
     await applyEventStatus(event, status);
     return redirect(base);
@@ -95,7 +106,7 @@ async function handleEventArea(req: Request, event: EventRecord, action: string)
     const phase = field(await req.formData(), "phase") as MissionPhase;
     const missions = await listAdminMissions(event.db_name);
     if (!MISSION_PHASES.includes(phase) || !missions.some((mission) => mission.id === phaseRoute[1])) {
-      return eventPage(event, 422, "Escolhe uma fase válida.");
+      return eventPage(event, canManage, 422, "Escolhe uma fase válida.");
     }
     await setMissionPhase(event.db_name, phaseRoute[1]!, phase);
     return redirect(`${base}#missoes`);
@@ -128,15 +139,39 @@ export async function handleClient(req: Request, path: string): Promise<Response
   }
 
   const email = await currentClientEmail(req);
+  const organizer = email ? await findActiveOrganizer(email) : undefined;
   if (path === "/cliente") {
     if (!email) return redirect("/entrar");
-    return htmlResponse(clientEventsPage(await listEventsForClient(email)));
+    return htmlResponse(clientEventsPage(await listEventsForClient(email, organizer?.id), Boolean(organizer)));
+  }
+
+  if (path === "/cliente/eventos/novo") {
+    if (!organizer) return req.method === "GET" ? redirect("/entrar") : new Response(null, { status: 401 });
+    const context = { action: "/cliente/eventos/novo", back: "/cliente", wrap: clientShell };
+    const { packs } = await getSite();
+    if (req.method === "GET") return htmlResponse(newEventPage(packs, {}, undefined, context));
+    if (req.method !== "POST") return notFound();
+    const parsed = readEventForm(await req.formData(), packs);
+    const values = { ...parsed.values, packId: parsed.packId };
+    if (parsed.error) return htmlResponse(newEventPage(packs, values, parsed.error, context), 422);
+    const event = await createEvent({
+      ...parsed.values,
+      organizerId: organizer.id,
+      photoLimit: (await getSettings()).defaultPhotoLimit,
+      packName: parsed.packName,
+      guestLimit: parsed.guestLimit,
+    });
+    return redirect(`/cliente/eventos/${event.id}`);
   }
 
   const match = path.match(/^\/cliente\/eventos\/([0-9a-f-]{36})(?:\/(.+))?$/);
   if (!match) return notFound();
   const event = await getEventById(match[1]!);
-  const allowed = Boolean(event) && (event!.couple_email === email || (await isAuthenticated(req)));
-  if (!allowed) return req.method === "GET" ? redirect("/entrar") : new Response(null, { status: 401 });
-  return handleEventArea(req, event!, match[2] ?? "");
+  if (!event) return notFound();
+  const isAdmin = await isAuthenticated(req);
+  const owns = organizer !== undefined && event.organizer_id === organizer.id;
+  if (!isAdmin && !owns && event.couple_email !== email) {
+    return req.method === "GET" ? redirect("/entrar") : new Response(null, { status: 401 });
+  }
+  return handleEventArea(req, event, match[2] ?? "", isAdmin || owns);
 }

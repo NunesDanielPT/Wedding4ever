@@ -108,26 +108,26 @@ export interface Site {
 
 const DEFAULT_SITE: Site = {
   texts: {
-    heroTitle: "A melhor foto do casamento pode vir de quem menos espera",
-    heroSubtitle: "Os convidados leem o QR Code da mesa, cumprem missões fotográficas e votam nas melhores capturas da noite, sem instalar aplicações.",
+    heroTitle: "A melhor foto do evento pode vir de quem menos espera",
+    heroSubtitle: "Em casamentos, batizados, aniversários ou qualquer festa, os convidados leem o QR Code da mesa, cumprem missões fotográficas e votam nas melhores capturas da noite, sem instalar aplicações.",
     heroButton: "Ver packs",
     heroImage: "",
     aboutTitle: "Uma batalha de fotografias entre os vossos convidados",
-    aboutText: "O Wedding4Ever transforma cada convidado num fotógrafo em missão. Enquanto a festa acontece, ficam guardados os momentos que o fotógrafo oficial não consegue ver, e no fim há vencedores para celebrar.",
+    aboutText: "Cada convidado torna-se um fotógrafo em missão. Enquanto o evento acontece, ficam guardados os momentos que o fotógrafo oficial não consegue ver, e no fim há vencedores para celebrar.",
     stepsTitle: "Como funciona",
     galleryTitle: "Momentos da festa",
-    testimonialsTitle: "O que dizem os noivos",
+    testimonialsTitle: "O que dizem os nossos clientes",
     adsTitle: "Parceiros",
     packsTitle: "Packs",
     packsNote: "O pack é escolhido pelo número de convidados do evento.",
     supportTitle: "Fala connosco",
     supportText: "Tens uma dúvida ou queres reservar a tua data? Envia-nos uma mensagem.",
-    footerText: "Wedding4Ever, Batalha da Melhor Foto",
+    footerText: "Fotografias, missões e votos para qualquer evento",
   },
   steps: [
-    { id: "s1", title: "Cartões nas mesas", text: "Cada evento tem o seu link, o seu QR Code e cartões com a identidade dos noivos." },
-    { id: "s2", title: "Missões fotográficas", text: "Os convidados entram pelo telemóvel e escolhem missões como um brinde ou a pista de dança." },
-    { id: "s3", title: "Votação na festa", text: "Os noivos abrem a votação de cada missão quando quiserem, mesmo a meio do jantar." },
+    { id: "s1", title: "Cartões nas mesas", text: "Cada evento tem o seu link, o seu QR Code e cartões com a sua identidade." },
+    { id: "s2", title: "Missões fotográficas", text: "Os convidados entram pelo telemóvel e escolhem as missões preparadas para aquele evento." },
+    { id: "s3", title: "Votação na festa", text: "A organização abre a votação de cada missão quando quiser, mesmo a meio da festa." },
     { id: "s4", title: "Vencedores e álbum", text: "As melhores fotografias são reveladas e todas as imagens ficam disponíveis para download." },
   ],
   gallery: [],
@@ -141,10 +141,33 @@ const DEFAULT_SITE: Site = {
   ],
 };
 
+/** Textos da versão só para casamentos, substituídos se nunca foram editados. */
+const WEDDING_TEXTS: Record<string, string> = {
+  heroTitle: "A melhor foto do casamento pode vir de quem menos espera",
+  heroSubtitle: "Os convidados leem o QR Code da mesa, cumprem missões fotográficas e votam nas melhores capturas da noite, sem instalar aplicações.",
+  aboutText: "O Wedding4Ever transforma cada convidado num fotógrafo em missão. Enquanto a festa acontece, ficam guardados os momentos que o fotógrafo oficial não consegue ver, e no fim há vencedores para celebrar.",
+  testimonialsTitle: "O que dizem os noivos",
+  footerText: "Wedding4Ever, Batalha da Melhor Foto",
+};
+const WEDDING_STEPS: Record<string, string> = {
+  s1: "Cada evento tem o seu link, o seu QR Code e cartões com a identidade dos noivos.",
+  s2: "Os convidados entram pelo telemóvel e escolhem missões como um brinde ou a pista de dança.",
+  s3: "Os noivos abrem a votação de cada missão quando quiserem, mesmo a meio do jantar.",
+};
+
 export async function getSite(): Promise<Site> {
   const rows: { value: Partial<Site> }[] = await central`SELECT value FROM settings WHERE key = 'site'`;
   const stored = rows[0]?.value ?? {};
-  const site = { ...DEFAULT_SITE, ...stored, texts: { ...DEFAULT_SITE.texts, ...stored.texts } };
+  const texts = { ...DEFAULT_SITE.texts, ...stored.texts };
+  for (const [key, value] of Object.entries(WEDDING_TEXTS)) {
+    if (texts[key] === value) texts[key] = DEFAULT_SITE.texts[key]!;
+  }
+  const site = { ...DEFAULT_SITE, ...stored, texts };
+  site.steps = site.steps.map((step) =>
+    step.text === WEDDING_STEPS[step.id]
+      ? { ...step, text: DEFAULT_SITE.steps.find((base) => base.id === step.id)!.text }
+      : step,
+  );
   const packs = site.packs.map((item) => ({
     ...item,
     maxGuests: item.maxGuests ?? DEFAULT_SITE.packs.find((base) => base.id === item.id)?.maxGuests ?? "",

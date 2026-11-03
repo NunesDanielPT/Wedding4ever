@@ -1,16 +1,18 @@
+import { brand } from "../lib/brand";
 import type { EventRecord, EventStats, RegisteredGuest } from "../db/events";
 import { EVENT_STATUSES } from "../db/events";
-import { coupleNames, formatDate } from "../lib/format";
+import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
 import { PHASE_LABELS, type AdminMission, type AlbumPhoto, type MissionPhase } from "../lib/missions";
+import { EVENT_TYPES } from "../lib/event-types";
 import { type DesignContext, STATUS_LABELS } from "./admin";
 import { guestTable } from "./guests";
 import { page, rings } from "./layout";
 
-function clientShell(title: string, content: Html, stylesheet?: string): string {
-  return page(`${title} | Wedding4Ever`, html`
+export function clientShell(title: string, content: Html, stylesheet?: string): string {
+  return page(`${title} | ${brand()}`, html`
     <header class="topbar">
-      <a class="brand" href="/cliente">${rings}<span>Wedding4Ever</span></a>
+      <a class="brand" href="/cliente">${rings}<span>${brand()}</span></a>
       <nav class="topnav">
         <a href="/cliente">Os meus eventos</a>
         <form method="post" action="/cliente/sair"><button class="link-button">Sair</button></form>
@@ -26,30 +28,34 @@ export function clientContext(event: EventRecord): DesignContext {
 }
 
 export function clientLoginPage(error?: string): string {
-  return page("Área de cliente | Wedding4Ever", html`
+  return page(`Entrar | ${brand()}`, html`
     <main class="login">
-      <a class="brand brand-large" href="/">${rings}<span>Wedding4Ever</span></a>
+      <a class="brand brand-large" href="/">${rings}<span>${brand()}</span></a>
       <h1 class="login-title">Área de cliente</h1>
+      <p class="hint">Para clientes e organizadores de eventos.</p>
       <form method="post" action="/entrar" class="stack">
         ${error && html`<p class="error" role="alert">${error}</p>`}
         <label>E-mail<input type="email" name="email" autocomplete="username" required autofocus></label>
-        <label>Código de acesso<input name="code" autocomplete="current-password" required></label>
+        <label>Código de acesso ou palavra-passe<input type="password" name="code" autocomplete="current-password" required></label>
         <button class="primary">Entrar</button>
       </form>
     </main>
   `);
 }
 
-export function clientEventsPage(events: EventRecord[]): string {
+export function clientEventsPage(events: EventRecord[], canCreate = false): string {
   return clientShell("Os meus eventos", html`
-    <h1>Os meus eventos</h1>
+    <div class="page-head">
+      <h1>Os meus eventos</h1>
+      ${canCreate && html`<a class="primary" href="/cliente/eventos/novo">Criar evento</a>`}
+    </div>
     ${events.length === 0
       ? html`<div class="empty"><p>Ainda não há eventos nesta conta.</p></div>`
       : html`<ul class="client-list event-list">
           ${events.map((event) => html`
             <li><a href="/cliente/eventos/${event.id}">
-              <span class="client-name">${coupleNames(event.partner_one, event.partner_two)}</span>
-              <span class="client-date">${formatDate(event.event_date)}</span>
+              <span class="client-name">${event.name}</span>
+              <span class="client-date">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}</span>
               <span class="status status-${event.status}">${STATUS_LABELS[event.status]}</span>
             </a></li>`)}
         </ul>`}
@@ -86,13 +92,13 @@ export function clientEventPage(
   guests: RegisteredGuest[],
   missions: AdminMission[],
   error?: string,
+  manage?: { code?: string },
 ): string {
   const base = `/cliente/eventos/${event.id}`;
-  const couple = coupleNames(event.partner_one, event.partner_two);
-  return clientShell(couple, html`
+  return clientShell(event.name, html`
     <a class="back" href="/cliente">Voltar aos eventos</a>
-    <h1>${couple}</h1>
-    <p class="lead">${formatDate(event.event_date)}${event.pack_name && `. Pack ${event.pack_name}`}</p>
+    <h1>${event.name}</h1>
+    <p class="lead">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}${event.pack_name && `. Pack ${event.pack_name}`}</p>
     ${error && html`<p class="error" role="alert">${error}</p>`}
     ${event.guest_limit !== null && stats.guests >= event.guest_limit && html`<p class="error" role="status">O limite de convidados do pack foi atingido. Novos convidados não conseguem entrar.</p>`}
 
@@ -110,6 +116,7 @@ export function clientEventPage(
 
     <section id="missoes" class="client-section">
       <h2>Gestão das missões</h2>
+      ${manage && html`<p><a class="action" href="${base}/missoes">Editar missões, sugestões e fotografias por missão</a></p>`}
       ${missions.length === 0
         ? html`<p>Este evento ainda não tem missões.</p>`
         : html`<ul class="client-missions">${missions.map((mission) => missionControls(event, mission))}</ul>`}
@@ -136,6 +143,13 @@ export function clientEventPage(
         <a href="${base}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
       </p>
     </section>
+
+    ${manage && html`<section class="client-section">
+      <h2>Acesso do cliente</h2>
+      <p>O cliente entra com ${event.couple_email} e um código de acesso.</p>
+      ${manage.code && html`<p class="notice" role="status">Código de acesso: <strong>${manage.code}</strong><br>Guarda-o agora. Não volta a ser mostrado.</p>`}
+      <form method="post" action="${base}/codigo"><button>${event.has_couple_code || manage.code ? "Gerar novo código" : "Gerar código de acesso"}</button></form>
+    </section>`}
 
     <section class="client-section">
       <h2>Convidados registados</h2>

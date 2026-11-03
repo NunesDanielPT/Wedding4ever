@@ -54,8 +54,8 @@ function get(path: string, withCookie = true) {
 }
 
 const couple = {
-  partnerOne: "João",
-  partnerTwo: "Inês",
+  name: "João e Inês",
+  eventType: "casamento",
   eventDate: "2027-06-12",
   venue: "Quinta da Ribeira",
   coupleEmail: "noivos@exemplo.pt",
@@ -78,7 +78,7 @@ afterAll(async () => {
   await removeLeftovers();
   await maintenance.close();
   await rm(storage, { recursive: true, force: true });
-});
+}, 60_000);
 
 describe("acesso de administração", () => {
   test("rejeita a palavra-passe errada", async () => {
@@ -124,7 +124,7 @@ describe("criação de clientes", () => {
 
   test("cria base, missões, link, QR Code e PDF", async () => {
     const event = await createClient();
-    expect(event.slug).toMatch(/^joao-ines-[a-z2-9]{6}$/);
+    expect(event.slug).toMatch(/^joao-e-ines-[a-z2-9]{6}$/);
     expect(event.schema_version).toBe(4);
     expect(event.status).toBe("rascunho");
     expect(await events.getEventStats(event.db_name)).toEqual({ missions: 7, guests: 0, photos: 0, photoLimit: 3 });
@@ -138,12 +138,12 @@ describe("criação de clientes", () => {
     const guest = await get(`/e/${event.slug}`, false);
     expect(guest.status).toBe(200);
     const guestBody = await guest.text();
-    expect(guestBody).toContain("João &amp; Inês");
+    expect(guestBody).toContain("João e Inês");
     expect(guestBody).toContain('name="email"');
   });
 
   test("escapa conteúdo introduzido nos nomes", async () => {
-    const event = await createClient({ ...couple, partnerOne: "<script>alert(1)</script>" });
+    const event = await createClient({ ...couple, name: "<script>alert(1)</script>" });
     const body = await (await get(`/admin/clientes/${event.id}`)).text();
     expect(body).not.toContain("<script>");
     expect(body).toContain("&lt;script&gt;");
@@ -217,7 +217,8 @@ function designForm(overrides: Record<string, string> = {}) {
   const form = new FormData();
   const values = {
     headline: "A nossa batalha", instructions: "Lê o código", backgroundColor: "#FFFFFF", textColor: "#222222",
-    accentColor: "#556B2F", qrColor: "#000000", qrBackground: "#FFFFFF", ...overrides,
+    accentColor: "#556B2F", qrColor: "#000000", qrBackground: "#FFFFFF", font: "moderna",
+    borderStyle: "simples", qrSize: "grande", overlay: "30", extraText: "Até já", ...overrides,
   };
   for (const [key, value] of Object.entries(values)) form.set(key, value);
   return form;
@@ -238,7 +239,7 @@ describe("personalização", () => {
     const theme = await (await get(`/e/${event.slug}/tema.css`, false)).text();
     expect(theme).toContain("--t-accent:#556B2F");
     expect(theme).toContain("media/background");
-    expect((await get(`/e/${event.slug}/media/background`, false)).headers.get("content-type")).toBe("image/png");
+    expect((await get(`/e/${event.slug}/media/background`, false)).headers.get("content-type")).toBe("image/jpeg");
     expect(await (await get(`/admin/clientes/${event.id}/qr.svg`)).text()).toContain('fill="#000000"');
 
     const pdf = new TextDecoder("latin1").decode(await (await get(`/admin/clientes/${event.id}/cartoes.pdf`)).arrayBuffer());
@@ -292,7 +293,7 @@ describe("definições", () => {
     const page = await handle(new Request(`${ORIGIN}/e/${event.slug}`, { headers: { Cookie: cookieOf(joined) } }));
     expect(await page.text()).toContain("0/1");
 
-    expect((await post(`/admin/clientes/${event.id}/limite-fotos`, { photoLimit: "2" })).status).toBe(303);
+    expect((await post(`/admin/clientes/${event.id}/missoes/limite`, { photoLimit: "2" })).status).toBe(303);
     expect((await events.getEventStats(event.db_name)).photoLimit).toBe(2);
     await post("/admin/definicoes/fotos", { photoLimit: "3" });
   });
@@ -639,7 +640,7 @@ describe("site público", () => {
     expect(body).toContain("Até 100 convidados");
     expect(body).toContain("Sob consulta");
     expect(body).toContain("Área de cliente");
-    expect(body).not.toContain("O que dizem os noivos");
+    expect(body).not.toContain("O que dizem os nossos clientes");
   });
 
   test("o painel altera textos, packs, testemunhos e imagens", async () => {
@@ -724,7 +725,7 @@ describe("área de cliente", () => {
 
   test("uma produtora vê os seus eventos e não os de outros", async () => {
     const first = await clientEvent();
-    const second = await createClient({ ...couple, partnerOne: "Marta", coupleEmail: "produtora@exemplo.pt" });
+    const second = await createClient({ ...couple, name: "Festa da Marta", coupleEmail: "produtora@exemplo.pt" });
     const other = await clientEvent("outra@exemplo.pt");
     expect((await post("/entrar", { email: "produtora@exemplo.pt", code: "ERRADO" }, { Cookie: "" })).status).toBe(401);
 
@@ -767,7 +768,7 @@ describe("área de cliente", () => {
     const design = designForm({ headline: "Título do cliente" });
     const saved = await handle(new Request(`${ORIGIN}${base}/personalizar`, { method: "POST", body: design, headers: { Origin: ORIGIN, Cookie: session } }));
     expect(saved.status).toBe(303);
-    expect(saved.headers.get("location")).toBe(`${base}/personalizar`);
+    expect(saved.headers.get("location")).toBe(`${base}/personalizar?guardado=1`);
 
     const zipResponse = await asClient(`${base}/fotos.zip`, session);
     expect(zipResponse.headers.get("content-type")).toBe("application/zip");
@@ -880,5 +881,116 @@ describe("administradores", () => {
     await ensureFirstAdmin();
     delete process.env.ADMIN_RESET;
     expect((await post("/admin/entrar", LOGIN, { Cookie: "" })).status).toBe(303);
+  });
+});
+
+describe("tipos de evento", () => {
+  test("cria o evento com nome próprio e missões do tipo escolhido", async () => {
+    expect((await post("/admin/clientes", { ...couple, name: "" })).status).toBe(422);
+    expect((await post("/admin/clientes", { ...couple, eventType: "outro" })).status).toBe(422);
+    const a = await createClient({ ...couple, name: "Batizado do Tomás", eventType: "batizado" });
+    const b = await createClient({ ...couple, name: "Batizado do Tomás", eventType: "batizado" });
+    expect(a.slug).not.toBe(b.slug);
+    const missions = await events.eventDb(a.db_name)`SELECT title FROM missions ORDER BY position`;
+    expect(missions.map((item: { title: string }) => item.title)).toContain("O sorriso do bebé");
+    const page = await (await get(`/admin/clientes/${a.id}/missoes`)).text();
+    expect(page).toContain("As mãos pequeninas");
+    expect(page).not.toContain("Beijo dos noivos");
+    expect(await (await get(`/e/${a.slug}`, false)).text()).toContain("Batizado do Tomás");
+  });
+});
+
+describe("personalização avançada", () => {
+  test("mantém as cores guardadas, aplica esquemas e repõe o padrão", async () => {
+    const event = await createClient();
+    const base = `/admin/clientes/${event.id}`;
+    await postMultipart(`${base}/personalizar`, designForm({ backgroundColor: "#112233" }));
+    const page = await get(`${base}/personalizar`);
+    expect(page.headers.get("cache-control")).toBe("no-store");
+    const body = await page.text();
+    expect(body).toContain('value="#112233"');
+    expect(body).toContain('data-font="moderna"');
+    expect((await get(`${base}/qr.svg?cor=%23101010&fundo=%23FFFFFF`)).status).toBe(200);
+    expect(await (await get(`${base}/qr.svg?cor=%23101010`)).text()).toContain('fill="#101010"');
+
+    const pdf = new TextDecoder("latin1").decode(await (await get(`${base}/cartoes.pdf`)).arrayBuffer());
+    expect(pdf).toContain("/BaseFont /Courier");
+
+    const preset = new FormData();
+    preset.set("preset", "noite");
+    await postMultipart(`${base}/personalizar`, preset);
+    expect(await (await get(`${base}/personalizar`)).text()).toContain('value="#16233A"');
+    const reset = new FormData();
+    reset.set("preset", "tudo");
+    await postMultipart(`${base}/personalizar`, reset);
+    const after = await (await get(`${base}/personalizar`)).text();
+    expect(after).toContain('value="#FBF8F1"');
+    expect(after).toContain('data-font="classica"');
+  });
+});
+
+describe("organizadores", () => {
+  test("o superadmin cria a conta e o organizador gere só os seus eventos", async () => {
+    expect((await post("/admin/organizadores", { name: "Foto Lda", email: "foto@exemplo.pt", password: "curta" })).status).toBe(422);
+    expect((await post("/admin/organizadores", { name: "Foto Lda", email: "foto@exemplo.pt", password: "palavra-passe-longa" })).status).toBe(303);
+    const list = await (await get("/admin/organizadores")).text();
+    expect(list).toContain("foto@exemplo.pt");
+    const organizerId = list.match(/organizadores\/([0-9a-f-]{36})\/palavra-passe/)![1]!;
+
+    const loginResponse = await post("/entrar", { email: "foto@exemplo.pt", code: "palavra-passe-longa" }, { Cookie: "" });
+    expect(loginResponse.status).toBe(303);
+    const session = cookieOf(loginResponse);
+    const as = (path: string) => handle(new Request(`${ORIGIN}${path}`, { headers: { Cookie: session } }));
+    expect(await (await as("/cliente")).text()).toContain("Criar evento");
+
+    const created = await post("/cliente/eventos/novo", { ...couple, name: "Festa de Verão", eventType: "evento", packId: "" }, { Cookie: session });
+    expect(created.status).toBe(303);
+    const area = created.headers.get("location")!;
+    const id = area.split("/").pop()!;
+    expect((await events.getEventById(id))!.organizer_id).toBe(organizerId);
+    expect(await (await as("/cliente")).text()).toContain("Festa de Verão");
+
+    expect((await post(`${area}/missoes`, { title: "Missão do fotógrafo" }, { Cookie: session })).status).toBe(303);
+    expect(await (await as(`${area}/missoes`)).text()).toContain("Missão do fotógrafo");
+    expect((await as(`${area}/personalizar`)).status).toBe(200);
+    expect(await (await post(`${area}/codigo`, {}, { Cookie: session })).text()).toContain("Código de acesso:");
+
+    const other = await createClient();
+    expect((await as(`/cliente/eventos/${other.id}`)).status).toBe(303);
+    expect((await as(`/admin`)).status).toBe(303);
+
+    const client = await createClient({ ...couple, coupleEmail: "cliente-final@exemplo.pt" });
+    const code = (await (await post(`/admin/clientes/${client.id}/codigo-noivos`, {})).text()).match(/<strong>([A-Z2-9]{10})</)![1]!;
+    const clientSession = cookieOf(await post("/entrar", { email: "cliente-final@exemplo.pt", code }, { Cookie: "" }));
+    expect((await post(`/cliente/eventos/${client.id}/missoes`, { title: "Não pode" }, { Cookie: clientSession })).status).toBe(404);
+
+    await post(`/admin/organizadores/${organizerId}/desativar`, {});
+    expect((await as("/cliente")).status).toBe(303);
+    expect((await post("/entrar", { email: "foto@exemplo.pt", code: "palavra-passe-longa" }, { Cookie: "" })).status).toBe(401);
+  });
+});
+
+describe("estatísticas", () => {
+  test("soma eventos, registos e fotos por período e por evento", async () => {
+    const event = await createClient({ ...couple, name: "Evento das Estatísticas", eventDate: "2027-06-12" });
+    await events.setEventStatus(event.id, "aberto");
+    await post(`/e/${event.slug}/entrar`, { name: "Pessoa Um", email: "um@exemplo.pt" }, { Cookie: "" });
+    await post(`/e/${event.slug}/entrar`, { name: "Pessoa Dois", email: "dois@exemplo.pt" }, { Cookie: "" });
+
+    const { getStats } = await import("../src/lib/stats");
+    const now = new Date();
+    const year = now.getFullYear();
+    const stats = await getStats({ year, eventId: event.id });
+    expect(stats.totals.guests).toBe(2);
+    expect(stats.totals.created).toBe(1);
+    const month = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Lisbon", month: "numeric" }).format(now));
+    expect(stats.months[month - 1]!.guests).toBe(2);
+    expect((await getStats({ year: 2027, eventId: event.id })).totals.held).toBe(1);
+    expect((await getStats({ year: year - 1, eventId: event.id })).totals.guests).toBe(0);
+
+    const page = await (await get(`/admin/estatisticas?ano=${year}&evento=${event.id}`)).text();
+    expect(page).toContain("Evento das Estatísticas");
+    expect(page).toContain("Por mês em");
+    expect((await get("/admin/estatisticas", false)).status).toBe(303);
   });
 });
