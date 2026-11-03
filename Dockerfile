@@ -1,4 +1,4 @@
-FROM oven/bun:1.4-alpine
+FROM oven/bun:1.4-slim
 WORKDIR /app
 COPY package.json tsconfig.json ./
 COPY src ./src
@@ -9,4 +9,4 @@ EXPOSE 3000
 VOLUME /data
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
   CMD bun -e "const r=await fetch('http://127.0.0.1:'+process.env.PORT+'/healthz');process.exit(r.ok?0:1)"
-CMD ["bun", "src/main.ts"]
+ENTRYPOINT ["bun", "src/main.ts"]

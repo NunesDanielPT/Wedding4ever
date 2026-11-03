@@ -33,37 +33,15 @@ Para correr os testes é preciso um PostgreSQL local. Os testes apagam a base `w
 TEST_POSTGRES_URL=postgres://postgres:test@127.0.0.1:5432/postgres bun test
 ```
 
-## Publicar no GitHub
-
-1. Cria um repositório privado chamado `wedding4ever`.
-2. Envia este código para o ramo `main`.
-3. O GitHub Actions corre os testes e publica a imagem em `ghcr.io/<utilizador>/wedding4ever`.
-
 ## Instalar no Portainer
 
-1. Em **Registries**, adiciona `ghcr.io` com o teu utilizador do GitHub e um token com `read:packages`.
-2. Em **Stacks**, cria uma stack com o conteúdo de `docker-compose.yml`.
-3. Define as variáveis:
+1. Em **Stacks**, cria uma stack a partir do repositório, com o ramo `refs/heads/main` e o ficheiro `docker-compose.yml`.
+2. Define as variáveis `PUBLIC_URL`, `POSTGRES_PASSWORD`, `APP_SECRET`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` e, se quiseres, `APP_PORT`.
+3. Faz o deploy e abre `PUBLIC_URL/admin`.
 
-| Variável | Valor |
-| --- | --- |
-| `GITHUB_OWNER` | Utilizador do GitHub, em minúsculas |
-| `PUBLIC_URL` | Endereço público, por exemplo `https://wedding4ever.pt` |
-| `POSTGRES_PASSWORD` | Resultado de `openssl rand -hex 32` |
-| `APP_SECRET` | Outro resultado de `openssl rand -hex 32` |
-| `ADMIN_EMAIL` | O teu e-mail |
-| `ADMIN_PASSWORD` | Pelo menos 12 caracteres |
-| `APP_PORT` | Opcional, 3000 por predefinição |
+O servidor constrói a aplicação para o seu próprio processador. Para atualizar, usa **Pull and redeploy** na stack.
 
-4. Abre `PUBLIC_URL/admin`.
-
-Guarda o `APP_SECRET` num local seguro. Se mudar, a aplicação deixa de conseguir entrar nas bases dos clientes.
-
-`PUBLIC_URL` tem de ser igual ao endereço usado no browser, porque os formulários são recusados quando a origem não coincide.
-
-## Atualização automática
-
-Ativa o webhook da stack no Portainer e guarda o URL como segredo `PORTAINER_WEBHOOK_URL` no GitHub. Esse endereço tem de estar acessível a partir da internet. Se o Portainer só estiver disponível em casa, publica apenas o webhook através do Cloudflare Tunnel, ou atualiza a stack manualmente com a opção de obter a imagem mais recente.
+`APP_SECRET` tem pelo menos 32 caracteres e não pode mudar depois de criares clientes. `PUBLIC_URL` tem de ser igual ao endereço usado no browser.
 
 ## Alterar a base de dados
 

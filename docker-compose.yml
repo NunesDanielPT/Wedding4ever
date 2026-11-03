@@ -1,7 +1,9 @@
-# Stack para o Portainer. Define os valores em "Environment variables".
+# Stack para o Portainer. O servidor constrói a aplicação a partir deste repositório.
 services:
   app:
-    image: ghcr.io/${GITHUB_OWNER:?}/wedding4ever:${IMAGE_TAG:-latest}
+    build: .
+    pull_policy: build
+    image: wedding4ever:local
     restart: unless-stopped
     depends_on:
       postgres:
