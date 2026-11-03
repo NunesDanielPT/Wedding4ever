@@ -1,0 +1,131 @@
+:root {
+  --paper: #efe7d8;
+  --card: #fbf8f1;
+  --ink: #33373b;
+  --ink-soft: #5e6063;
+  --navy: #1f3350;
+  --gold: #a98a4b;
+  --gold-text: #75602f;
+  --olive: #565e3d;
+  --line: #d8ccb6;
+  --danger: #8c2f2b;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --sans: "Avenir Next", Avenir, "Segoe UI", Candara, "Noto Sans", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 1rem/1.55 var(--sans);
+}
+
+h1, h2 { color: var(--navy); font-family: var(--serif); font-weight: 400; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); }
+h2 { font-size: 1.2rem; margin-bottom: .6rem; }
+p { margin: 0 0 1rem; }
+a { color: var(--navy); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+
+.rings { width: 34px; height: 22px; fill: none; stroke: var(--gold); stroke-width: 2; }
+.brand { align-items: center; color: var(--navy); display: inline-flex; font-family: var(--serif); font-size: 1.2rem; gap: .55rem; text-decoration: none; }
+.brand-large { font-size: 1.7rem; margin-bottom: 2rem; }
+
+.topbar { align-items: center; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; padding: .85rem clamp(1rem, 4vw, 2.5rem); }
+.admin { margin: 0 auto; max-width: 1040px; padding: 2.25rem clamp(1rem, 4vw, 2.5rem) 4rem; }
+.page-head { align-items: center; display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; margin-bottom: 2rem; }
+.back { color: var(--ink-soft); display: inline-block; font-size: .92rem; margin-bottom: 1.25rem; }
+.lead { color: var(--ink-soft); margin: .6rem 0 1.75rem; max-width: 60ch; }
+
+label { color: var(--ink); display: grid; font-size: .92rem; gap: .3rem; }
+input, select {
+  background: var(--card);
+  border: 1px solid #a99f8c;
+  border-radius: 3px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 44px;
+  padding: .55rem .7rem;
+  width: 100%;
+}
+button, .primary {
+  background: var(--card);
+  border: 1px solid var(--navy);
+  border-radius: 3px;
+  color: var(--navy);
+  cursor: pointer;
+  display: inline-block;
+  font: inherit;
+  min-height: 44px;
+  padding: .55rem 1.1rem;
+  text-decoration: none;
+}
+.primary { background: var(--navy); color: #fff; }
+.destructive { border-color: var(--danger); color: var(--danger); }
+.link-button { background: none; border: 0; min-height: 0; padding: .25rem; text-decoration: underline; text-underline-offset: 3px; }
+
+.stack { display: grid; gap: 1rem; }
+.stack .primary { justify-self: start; }
+.narrow { max-width: 560px; }
+.pair { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; }
+.inline-form { display: flex; gap: .6rem; }
+.inline-form button { flex: none; }
+.error { background: #f6e4dd; border-left: 3px solid var(--danger); color: var(--danger); margin: 0 0 1rem; padding: .6rem .8rem; }
+
+.login { margin: 12vh auto 2rem; max-width: 380px; padding: 0 1rem; }
+
+.empty { border: 1px dashed #a99f8c; color: var(--ink-soft); padding: 2.5rem 1.5rem; text-align: center; }
+.empty p { margin: 0 auto; max-width: 46ch; }
+
+.client-list { border-top: 1px solid var(--line); list-style: none; margin: 0; padding: 0; }
+.client-list li { border-bottom: 1px solid var(--line); }
+.client-list a { align-items: center; color: inherit; display: grid; gap: .2rem 1rem; grid-template-columns: 3.2rem minmax(0, 1fr) 11rem 6.5rem; padding: .85rem .25rem; text-decoration: none; }
+.client-list a:hover { background: var(--card); }
+.client-name { color: var(--navy); font-family: var(--serif); font-size: 1.25rem; overflow-wrap: anywhere; }
+.client-date { color: var(--ink-soft); font-size: .92rem; }
+.monogram { color: var(--gold-text); font-family: var(--serif); font-size: 1.15rem; font-style: italic; }
+.status { font-size: .88rem; }
+.status-aberto, .status-votacao { color: var(--olive); font-weight: 600; }
+.status-resultados { color: var(--navy); font-weight: 600; }
+.status-rascunho, .status-arquivado { color: var(--ink-soft); }
+
+.event-layout { align-items: start; display: grid; gap: clamp(2rem, 5vw, 3.5rem); grid-template-columns: minmax(0, 400px) minmax(0, 1fr); }
+
+.place-card {
+  background: var(--card);
+  border: 1px solid var(--gold);
+  outline: 1px solid var(--gold);
+  outline-offset: -8px;
+  padding: 2.75rem 1.75rem 2rem;
+  text-align: center;
+}
+.card-monogram { color: var(--gold-text); font-family: var(--serif); font-size: clamp(4rem, 13vw, 5.5rem); line-height: 1; margin: 0 0 1rem; }
+.card-monogram span { font-size: .42em; font-style: italic; margin: 0 .12em; vertical-align: .55em; }
+.place-card h1 { font-size: 1.85rem; overflow-wrap: anywhere; }
+.card-date { color: var(--ink-soft); font-family: var(--serif); margin: .4rem 0 1.25rem; }
+.place-card img { display: block; height: auto; margin: 0 auto 1.25rem; max-width: 100%; }
+.card-actions { display: grid; font-size: .92rem; gap: .35rem; margin: 0; }
+
+.event-side { display: grid; gap: 1.75rem; }
+.copy-field { margin-bottom: .5rem; }
+.facts { display: grid; gap: .75rem; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; }
+.facts dt { color: var(--ink-soft); font-size: .85rem; }
+.facts dd { color: var(--navy); font-family: var(--serif); font-size: 1.6rem; margin: 0; }
+.danger { border-top: 1px solid var(--line); padding-top: 1rem; }
+.danger summary { color: var(--danger); cursor: pointer; margin-bottom: .75rem; }
+
+.guest-page { display: grid; min-height: 100vh; min-height: 100dvh; place-items: center; }
+.guest { max-width: 30rem; padding: 2rem 1.25rem; text-align: center; }
+.guest-title { color: var(--navy); font-family: var(--serif); font-size: 1.3rem; margin-top: 2rem; }
+
+@media (max-width: 760px) {
+  .event-layout, .pair { grid-template-columns: minmax(0, 1fr); }
+  .client-list a { grid-template-columns: 2.6rem minmax(0, 1fr) auto; }
+  .client-name { grid-column: 2 / 3; }
+  .client-date { grid-column: 2 / 3; grid-row: 2; }
+  .status { grid-column: 3; grid-row: 1 / 3; }
+  .monogram { grid-row: 1 / 3; }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

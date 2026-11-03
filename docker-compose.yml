@@ -1,0 +1,37 @@
+# Stack para o Portainer. Define os valores em "Environment variables".
+services:
+  app:
+    image: ghcr.io/${GITHUB_OWNER:?}/wedding4ever:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:?}
+      DATABASE_URL: postgres://w4e_admin:${POSTGRES_PASSWORD:?}@postgres:5432/wedding4ever
+      APP_SECRET: ${APP_SECRET:?}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - photos:/data
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: w4e_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: wedding4ever
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U w4e_admin -d wedding4ever"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    volumes:
+      - postgres:/var/lib/postgresql/data
+
+volumes:
+  photos:
+  postgres:
