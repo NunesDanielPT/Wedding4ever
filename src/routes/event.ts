@@ -1,4 +1,4 @@
-import { EVENT_STATUSES, eventDesign, getEventBySlug, getEventStats, listGuests, listMissions, setEventStatus, type EventRecord, type EventStatus } from "../db/events";
+import { applyEventStatus, EVENT_STATUSES, eventDesign, getEventBySlug, getEventStats, listGuests, listMissions, type EventRecord, type EventStatus } from "../db/events";
 import { themeCss } from "../lib/design";
 import { cardsPdfResponse, mediaPath, qrPngResponse, qrSvgResponse } from "../lib/event-assets";
 import {
@@ -12,17 +12,22 @@ import {
   loginCouple,
   logoutCouple,
 } from "../lib/event-auth";
+import { listAdminMissions, MISSION_PHASES, setMissionPhase, type MissionPhase } from "../lib/missions";
 import {
+  canViewPhoto,
   countGuestPhotos,
   deleteOwnPhoto,
+  getGuestVote,
   getMission,
-  isVisiblePhoto,
-  listMissionPhotos,
+  listGalleryPhotos,
+  listOwnPhotos,
   MAX_CAPTION_LENGTH,
   MAX_PHOTO_BYTES,
   PhotoError,
   previewPath,
   savePhoto,
+  thumbPath,
+  votePhoto,
   type MissionDetail,
 } from "../lib/photos";
 import { coupleLoginPage, couplePanelPage, guestHomePage, joinPage, missionPage } from "../views/public";
@@ -31,8 +36,12 @@ import { field, htmlResponse, isEmail, notFound, redirect } from "./http";
 const COUPLE_STATUSES = EVENT_STATUSES.filter((status) => status !== "arquivado");
 
 async function couplePanel(event: EventRecord, error?: string, status = 200): Promise<Response> {
-  const [stats, guests] = await Promise.all([getEventStats(event.db_name), listGuests(event.db_name)]).catch(() => [null, []]);
-  return htmlResponse(couplePanelPage(event, stats, guests, error), status);
+  const [stats, guests, missions] = await Promise.all([
+    getEventStats(event.db_name),
+    listGuests(event.db_name),
+    listAdminMissions(event.db_name),
+  ]).catch(() => [null, [], []] as const);
+  return htmlResponse(couplePanelPage(event, stats, [...guests], [...missions], error), status);
 }
 
 async function handleCouple(req: Request, event: EventRecord, action: string): Promise<Response> {
@@ -70,7 +79,16 @@ async function handleCouple(req: Request, event: EventRecord, action: string): P
     if (event.status === "arquivado" || !COUPLE_STATUSES.includes(status)) {
       return couplePanel(event, "Não é possível aplicar esse estado.", 422);
     }
-    await setEventStatus(event.id, status);
+    await applyEventStatus(event, status);
+    return redirect(base);
+  }
+
+  const phaseRoute = action.match(/^missoes\/([0-9a-f-]{36})\/fase$/);
+  if (phaseRoute && req.method === "POST") {
+    const phase = field(await req.formData(), "phase") as MissionPhase;
+    const mission = await getMission(event.db_name, phaseRoute[1]!);
+    if (!mission || !MISSION_PHASES.includes(phase)) return couplePanel(event, "Escolhe uma fase válida.", 422);
+    await setMissionPhase(event.db_name, mission.id, phase);
     return redirect(base);
   }
 
@@ -87,16 +105,21 @@ async function guestHome(req: Request, event: EventRecord): Promise<Response> {
   return htmlResponse(guestHomePage(event, guest, await listMissions(event.db_name, guest.id)));
 }
 
+function isPlaying(event: EventRecord): boolean {
+  return event.status !== "rascunho" && event.status !== "arquivado";
+}
+
 async function renderMission(event: EventRecord, guest: Guest, mission: MissionDetail, error?: string, status = 200): Promise<Response> {
-  const [photos, sent] = await Promise.all([
-    listMissionPhotos(event, mission.id),
+  const [photos, sent, vote] = await Promise.all([
+    mission.phase === "envio" ? listOwnPhotos(event, mission.id, guest.id) : listGalleryPhotos(event, mission),
     countGuestPhotos(event.db_name, guest.id, mission.id),
+    getGuestVote(event.db_name, guest.id, mission.id),
   ]);
-  return htmlResponse(missionPage(event, guest, mission, photos, sent, error), status);
+  return htmlResponse(missionPage(event, guest, mission, photos, sent, vote, error), status);
 }
 
 async function handleUpload(req: Request, event: EventRecord, guest: Guest, mission: MissionDetail): Promise<Response> {
-  if (event.status !== "aberto") return renderMission(event, guest, mission, "O envio de fotografias está fechado.", 409);
+  if (mission.phase !== "envio") return renderMission(event, guest, mission, "O envio de fotografias está fechado.", 409);
   const form = await req.formData();
   const file = form.get("photo");
   const caption = field(form, "caption");
@@ -116,11 +139,12 @@ async function handleUpload(req: Request, event: EventRecord, guest: Guest, miss
 
 async function handlePhotos(req: Request, event: EventRecord, action: string): Promise<Response | undefined> {
   const missionRoute = action.match(/^missoes\/([0-9a-f-]{36})(\/fotos)?$/);
-  const photoRoute = action.match(/^fotos\/([0-9a-f-]{36})\/(preview|apagar)$/);
+  const photoRoute = action.match(/^fotos\/([0-9a-f-]{36})\/(preview|thumb|apagar|votar)$/);
   if (!missionRoute && !photoRoute) return undefined;
 
   const guest = await currentGuest(req, event);
   if (!guest) return req.method === "GET" ? redirect(`/e/${event.slug}`) : new Response(null, { status: 401 });
+  if (!isPlaying(event)) return req.method === "GET" ? redirect(`/e/${event.slug}`) : new Response(null, { status: 409 });
 
   if (missionRoute) {
     const mission = await getMission(event.db_name, missionRoute[1]!);
@@ -130,17 +154,27 @@ async function handlePhotos(req: Request, event: EventRecord, action: string): P
     return notFound();
   }
 
-  const photoId = photoRoute![1]!;
-  if (photoRoute![2] === "preview" && req.method === "GET") {
-    if (!(await isVisiblePhoto(event.db_name, photoId))) return notFound();
-    return new Response(Bun.file(previewPath(event.id, photoId)), {
+  const [, photoId, photoAction] = photoRoute as unknown as [string, string, string];
+  if ((photoAction === "preview" || photoAction === "thumb") && req.method === "GET") {
+    if (!(await canViewPhoto(event.db_name, guest.id, photoId))) return notFound();
+    const thumb = Bun.file(thumbPath(event.id, photoId));
+    const useThumb = photoAction === "thumb" && (await thumb.exists());
+    return new Response(useThumb ? thumb : Bun.file(previewPath(event.id, photoId)), {
       headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=86400" },
     });
   }
-  if (photoRoute![2] === "apagar" && req.method === "POST") {
-    if (event.status !== "aberto") return redirect(`/e/${event.slug}`);
+  if (photoAction === "apagar" && req.method === "POST") {
     const missionId = await deleteOwnPhoto(event, guest.id, photoId);
     return missionId ? redirect(`/e/${event.slug}/missoes/${missionId}`) : notFound();
+  }
+  if (photoAction === "votar" && req.method === "POST") {
+    try {
+      const missionId = await votePhoto(event.db_name, guest.id, photoId);
+      return redirect(`/e/${event.slug}/missoes/${missionId}`);
+    } catch (cause) {
+      if (cause instanceof PhotoError) return new Response(cause.message, { status: 422 });
+      throw cause;
+    }
   }
   return notFound();
 }

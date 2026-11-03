@@ -178,6 +178,13 @@ export async function setEventStatus(id: string, status: EventStatus): Promise<v
   await central`UPDATE events SET status = ${status}, updated_at = now() WHERE id = ${id}::uuid`;
 }
 
+/** Aplica o estado geral; votação e resultados fazem avançar as missões que estão atrás. */
+export async function applyEventStatus(event: EventRecord, status: EventStatus): Promise<void> {
+  await setEventStatus(event.id, status);
+  if (status === "votacao") await eventDb(event.db_name)`UPDATE missions SET phase = 'votacao' WHERE phase = 'envio'`;
+  if (status === "resultados") await eventDb(event.db_name)`UPDATE missions SET phase = 'encerrada'`;
+}
+
 export function eventDesign(event: EventRecord): Design {
   return resolveDesign(event.design);
 }
@@ -208,13 +215,14 @@ export interface Mission {
   title: string;
   position: number;
   photo_limit: number;
+  phase: "envio" | "votacao" | "encerrada";
   sent: number;
 }
 
 /** Lista as missões com o número de fotografias que este convidado já enviou. */
 export async function listMissions(dbName: string, guestId: string): Promise<Mission[]> {
   return eventDb(dbName)`
-    SELECT m.id, m.title, m.position, m.photo_limit,
+    SELECT m.id, m.title, m.position, m.photo_limit, m.phase,
            (SELECT count(*)::int FROM photos p WHERE p.mission_id = m.id AND p.guest_id = ${guestId}::uuid) AS sent
     FROM missions m WHERE m.active ORDER BY m.position
   `;

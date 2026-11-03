@@ -20,7 +20,7 @@ export interface PlatformSettings {
 }
 
 export const MIN_PHOTO_LIMIT = 1;
-export const MAX_PHOTO_LIMIT = 10;
+export const MAX_PHOTO_LIMIT = 50;
 
 const DEFAULTS: PlatformSettings = {
   defaultPhotoLimit: 3,

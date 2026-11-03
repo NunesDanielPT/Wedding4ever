@@ -3,6 +3,7 @@ import type { Design } from "../lib/design";
 import { eventUrl } from "../lib/event-assets";
 import { coupleNames, formatDate, initial } from "../lib/format";
 import { html, Html } from "../lib/html";
+import { MAX_TITLE_LENGTH, MISSION_PHASES, MISSION_SUGGESTIONS, PHASE_LABELS, type AdminMission } from "../lib/missions";
 import { MAX_PHOTO_LIMIT, MIN_PHOTO_LIMIT, type PlatformSettings } from "../lib/settings";
 import { guestTable } from "./guests";
 import { page, rings } from "./layout";
@@ -126,13 +127,13 @@ export function eventPage(
           <a href="${url}" target="_blank" rel="noopener">Abrir como convidado</a>
         </section>
 
-        ${stats && html`<section>
-          <h2>Fotografias por pessoa em cada missão</h2>
-          <form method="post" action="/admin/clientes/${event.id}/limite-fotos" class="inline-form">
-            <input type="number" name="photoLimit" min="${MIN_PHOTO_LIMIT}" max="${MAX_PHOTO_LIMIT}" value="${stats.photoLimit}" required aria-label="Fotografias por pessoa em cada missão">
-            <button>Guardar limite</button>
-          </form>
-        </section>`}
+        <section>
+          <h2>Definições do cliente</h2>
+          <p class="downloads">
+            <a href="/admin/clientes/${event.id}/missoes">Missões, fases e fotografias por missão</a>
+            <a href="/admin/clientes/${event.id}/personalizar">Personalizar cartões e página</a>
+          </p>
+        </section>
 
         <section>
           <h2>Acesso dos noivos</h2>
@@ -304,5 +305,73 @@ export function settingsPage(settings: PlatformSettings, adminEmail: string, not
         </form>
       </section>
     </div>
+  `);
+}
+
+export function missionsPage(event: EventRecord, missions: AdminMission[], error?: string): string {
+  const couple = coupleNames(event.partner_one, event.partner_two);
+  const base = `/admin/clientes/${event.id}/missoes`;
+  const used = new Set(missions.map((mission) => mission.title.toLowerCase()));
+  const suggestions = MISSION_SUGGESTIONS.filter((title) => !used.has(title.toLowerCase()));
+  return shell(`Missões de ${couple}`, html`
+    <a class="back" href="/admin/clientes/${event.id}">Voltar a ${couple}</a>
+    <h1>Missões de ${couple}</h1>
+    <p class="lead">Cada missão tem a sua fase e o seu limite. Podes pôr uma em votação e deixar as outras para depois.</p>
+    ${error && html`<p class="error" role="alert">${error}</p>`}
+
+    ${missions.length === 0
+      ? html`<div class="empty"><p>Este cliente ainda não tem missões. Escreve uma ou escolhe uma sugestão.</p></div>`
+      : html`<ol class="admin-missions">
+          ${missions.map((mission, index) => html`
+            <li>
+              <form method="post" action="${base}/${mission.id}/guardar" class="mission-form">
+                <label class="mission-title">Missão<input name="title" maxlength="${MAX_TITLE_LENGTH}" required value="${mission.title}"></label>
+                <label>Fotos por pessoa<input type="number" name="photoLimit" min="${MIN_PHOTO_LIMIT}" max="${MAX_PHOTO_LIMIT}" required value="${mission.photo_limit}"></label>
+                <label>Fase
+                  <select name="phase">
+                    ${MISSION_PHASES.map((phase) => html`<option value="${phase}" ${phase === mission.phase ? new Html("selected") : ""}>${PHASE_LABELS[phase]}</option>`)}
+                  </select>
+                </label>
+                <button>Guardar</button>
+              </form>
+              <div class="mission-tools">
+                <span>${mission.photos} ${mission.photos === 1 ? "fotografia" : "fotografias"}, ${mission.votes} ${mission.votes === 1 ? "voto" : "votos"}</span>
+                <form method="post" action="${base}/${mission.id}/subir"><button class="link-button" ${index === 0 ? new Html("disabled") : ""}>Subir</button></form>
+                <form method="post" action="${base}/${mission.id}/descer"><button class="link-button" ${index === missions.length - 1 ? new Html("disabled") : ""}>Descer</button></form>
+                <details class="danger-inline">
+                  <summary>Apagar</summary>
+                  <form method="post" action="${base}/${mission.id}/apagar" class="stack">
+                    ${mission.photos > 0 && html`<label class="check"><input type="checkbox" name="confirm" required> Apagar também ${mission.photos} ${mission.photos === 1 ? "fotografia" : "fotografias"}</label>`}
+                    <button class="destructive">Apagar missão</button>
+                  </form>
+                </details>
+              </div>
+            </li>`)}
+        </ol>`}
+
+    <section class="add-mission">
+      <h2>Adicionar missão</h2>
+      <form method="post" action="${base}" class="inline-form">
+        <input name="title" maxlength="${MAX_TITLE_LENGTH}" required placeholder="Escreve a tua missão" aria-label="Nova missão">
+        <button>Adicionar</button>
+      </form>
+      ${suggestions.length > 0 && html`
+        <h3>Sugestões</h3>
+        <ul class="suggestions">
+          ${suggestions.map((title) => html`
+            <li><form method="post" action="${base}">
+              <input type="hidden" name="title" value="${title}">
+              <button>${title}</button>
+            </form></li>`)}
+        </ul>`}
+    </section>
+
+    <section class="add-mission">
+      <h2>Aplicar o mesmo limite a todas</h2>
+      <form method="post" action="/admin/clientes/${event.id}/limite-fotos" class="inline-form narrow-form">
+        <input type="number" name="photoLimit" min="${MIN_PHOTO_LIMIT}" max="${MAX_PHOTO_LIMIT}" required value="${missions[0]?.photo_limit ?? 1}" aria-label="Fotografias por pessoa em todas as missões">
+        <button>Aplicar a todas</button>
+      </form>
+    </section>
   `);
 }

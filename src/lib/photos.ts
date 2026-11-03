@@ -19,12 +19,14 @@ export interface Photo {
   guest_name: string;
   caption: string;
   preview_status: "pending" | "ready" | "failed";
+  votes: number;
 }
 
 export interface MissionDetail {
   id: string;
   title: string;
   photo_limit: number;
+  phase: "envio" | "votacao" | "encerrada";
 }
 
 export class PhotoError extends Error {}
@@ -50,6 +52,18 @@ export function previewPath(eventId: string, photoId: string): string {
   return join(photosDir(eventId), `${photoId}.preview.jpg`);
 }
 
+export function thumbPath(eventId: string, photoId: string): string {
+  return join(photosDir(eventId), `${photoId}.thumb.jpg`);
+}
+
+export async function removePhotoFiles(eventId: string, photoId: string, extension: string): Promise<void> {
+  await Promise.all([
+    rm(originalPath(eventId, photoId, extension), { force: true }),
+    rm(previewPath(eventId, photoId), { force: true }),
+    rm(thumbPath(eventId, photoId), { force: true }),
+  ]);
+}
+
 const queue: (() => Promise<void>)[] = [];
 const scheduled = new Set<string>();
 let running = 0;
@@ -65,18 +79,30 @@ function pump(): void {
   }
 }
 
+async function convert(args: string[]): Promise<boolean> {
+  const process = Bun.spawn(["convert", "-limit", "memory", "256MiB", "-limit", "map", "512MiB", ...args], {
+    stdout: "ignore",
+    stderr: "ignore",
+    timeout: CONVERSION_TIMEOUT_MS,
+  });
+  return (await process.exited) === 0;
+}
+
+/** Cria a imagem de ecrã inteiro e, a partir dela, a miniatura quadrada da galeria. */
 async function createPreview(event: EventRecord, photoId: string, extension: PhotoExtension): Promise<void> {
   const source = originalPath(event.id, photoId, extension);
-  const target = previewPath(event.id, photoId);
-  const process = Bun.spawn(
-    [
-      "convert", "-limit", "memory", "256MiB", "-limit", "map", "512MiB",
+  const preview = previewPath(event.id, photoId);
+  const thumb = thumbPath(event.id, photoId);
+  const ready =
+    (await convert([
       `${IMAGE_CODER[extension]}:${source}[0]`,
-      "-auto-orient", "-thumbnail", "1200x1200>", "-strip", "-quality", "80", `jpeg:${target}`,
-    ],
-    { stdout: "ignore", stderr: "ignore", timeout: CONVERSION_TIMEOUT_MS },
-  );
-  const status = (await process.exited) === 0 ? "ready" : "failed";
+      "-auto-orient", "-resize", "1600x1600>", "-strip", "-quality", "82", `jpeg:${preview}`,
+    ])) &&
+    (await convert([
+      `jpeg:${preview}`,
+      "-thumbnail", "480x480^", "-gravity", "center", "-extent", "480x480", "-quality", "76", `jpeg:${thumb}`,
+    ]));
+  const status = ready ? "ready" : "failed";
   await eventDb(event.db_name)`UPDATE photos SET preview_status = ${status} WHERE id = ${photoId}::uuid`;
 }
 
@@ -95,7 +121,7 @@ export function schedulePreview(event: EventRecord, photoId: string, extension: 
 export async function getMission(dbName: string, id: string): Promise<MissionDetail | undefined> {
   if (!/^[0-9a-f-]{36}$/.test(id)) return undefined;
   const rows: MissionDetail[] = await eventDb(dbName)`
-    SELECT id, title, photo_limit FROM missions WHERE id = ${id}::uuid AND active
+    SELECT id, title, photo_limit, phase FROM missions WHERE id = ${id}::uuid AND active
   `;
   return rows[0];
 }
@@ -107,17 +133,60 @@ export async function countGuestPhotos(dbName: string, guestId: string, missionI
   return row!.count;
 }
 
-export async function listMissionPhotos(event: EventRecord, missionId: string): Promise<Photo[]> {
-  const rows: (Photo & { extension: PhotoExtension })[] = await eventDb(event.db_name)`
-    SELECT p.id, p.guest_id, g.full_name AS guest_name, p.caption, p.preview_status, p.extension
-    FROM photos p JOIN guests g ON g.id = p.guest_id
-    WHERE p.mission_id = ${missionId}::uuid AND NOT p.hidden
-    ORDER BY p.created_at DESC
-  `;
-  for (const photo of rows) {
+function schedulePending(event: EventRecord, photos: (Photo & { extension: PhotoExtension })[]): Photo[] {
+  for (const photo of photos) {
     if (photo.preview_status === "pending") schedulePreview(event, photo.id, photo.extension);
   }
-  return rows;
+  return photos;
+}
+
+export async function listOwnPhotos(event: EventRecord, missionId: string, guestId: string): Promise<Photo[]> {
+  const rows: (Photo & { extension: PhotoExtension })[] = await eventDb(event.db_name)`
+    SELECT p.id, p.guest_id, g.full_name AS guest_name, p.caption, p.preview_status, p.extension, 0 AS votes
+    FROM photos p JOIN guests g ON g.id = p.guest_id
+    WHERE p.mission_id = ${missionId}::uuid AND p.guest_id = ${guestId}::uuid AND NOT p.hidden
+    ORDER BY p.created_at DESC
+  `;
+  return schedulePending(event, rows);
+}
+
+/** Galeria completa da missão; nas encerradas, as mais votadas ficam primeiro. */
+export async function listGalleryPhotos(event: EventRecord, mission: MissionDetail): Promise<Photo[]> {
+  const rows: (Photo & { extension: PhotoExtension })[] = await eventDb(event.db_name)`
+    SELECT p.id, p.guest_id, g.full_name AS guest_name, p.caption, p.preview_status, p.extension,
+           (SELECT count(*)::int FROM votes v WHERE v.photo_id = p.id) AS votes
+    FROM photos p JOIN guests g ON g.id = p.guest_id
+    WHERE p.mission_id = ${mission.id}::uuid AND NOT p.hidden
+    ORDER BY p.created_at
+  `;
+  const photos = schedulePending(event, rows);
+  if (mission.phase !== "encerrada") return photos;
+  return [...photos].sort((a, b) => b.votes - a.votes);
+}
+
+export async function getGuestVote(dbName: string, guestId: string, missionId: string): Promise<string | undefined> {
+  const rows: { photo_id: string }[] = await eventDb(dbName)`
+    SELECT photo_id FROM votes WHERE guest_id = ${guestId}::uuid AND mission_id = ${missionId}::uuid
+  `;
+  return rows[0]?.photo_id;
+}
+
+/** Regista ou troca o voto; devolve a missão ou recusa votos fora das regras. */
+export async function votePhoto(dbName: string, guestId: string, photoId: string): Promise<string> {
+  const db = eventDb(dbName);
+  const rows: { mission_id: string; guest_id: string; phase: string }[] = await db`
+    SELECT p.mission_id, p.guest_id, m.phase FROM photos p JOIN missions m ON m.id = p.mission_id
+    WHERE p.id = ${photoId}::uuid AND NOT p.hidden
+  `;
+  const photo = rows[0];
+  if (!photo || photo.phase !== "votacao") throw new PhotoError("A votação desta missão não está aberta.");
+  if (photo.guest_id === guestId) throw new PhotoError("Não podes votar na tua própria fotografia.");
+  await db`
+    INSERT INTO votes (guest_id, mission_id, photo_id)
+    VALUES (${guestId}::uuid, ${photo.mission_id}::uuid, ${photoId}::uuid)
+    ON CONFLICT (guest_id, mission_id) DO UPDATE SET photo_id = EXCLUDED.photo_id, created_at = now()
+  `;
+  return photo.mission_id;
 }
 
 export interface NewPhoto {
@@ -161,24 +230,28 @@ export async function savePhoto(event: EventRecord, input: NewPhoto): Promise<vo
   schedulePreview(event, id, extension);
 }
 
-/** Só o autor apaga a fotografia, e devolve a missão para regressar à página certa. */
+/** Só o autor apaga e apenas enquanto a missão recebe fotografias. */
 export async function deleteOwnPhoto(event: EventRecord, guestId: string, photoId: string): Promise<string | undefined> {
   if (!/^[0-9a-f-]{36}$/.test(photoId)) return undefined;
   const rows: { mission_id: string; extension: string }[] = await eventDb(event.db_name)`
-    DELETE FROM photos WHERE id = ${photoId}::uuid AND guest_id = ${guestId}::uuid
-    RETURNING mission_id, extension
+    DELETE FROM photos p USING missions m
+    WHERE p.id = ${photoId}::uuid AND p.guest_id = ${guestId}::uuid
+      AND m.id = p.mission_id AND m.phase = 'envio'
+    RETURNING p.mission_id, p.extension
   `;
   const row = rows[0];
   if (!row) return undefined;
-  await rm(originalPath(event.id, photoId, row.extension), { force: true });
-  await rm(previewPath(event.id, photoId), { force: true });
+  await removePhotoFiles(event.id, photoId, row.extension);
   return row.mission_id;
 }
 
-export async function isVisiblePhoto(dbName: string, photoId: string): Promise<boolean> {
+/** A própria fotografia é sempre visível; as outras só depois de a missão sair da fase de envio. */
+export async function canViewPhoto(dbName: string, guestId: string, photoId: string): Promise<boolean> {
   if (!/^[0-9a-f-]{36}$/.test(photoId)) return false;
   const rows = await eventDb(dbName)`
-    SELECT 1 FROM photos WHERE id = ${photoId}::uuid AND NOT hidden AND preview_status = 'ready'
+    SELECT 1 FROM photos p JOIN missions m ON m.id = p.mission_id
+    WHERE p.id = ${photoId}::uuid AND NOT p.hidden AND p.preview_status = 'ready'
+      AND (p.guest_id = ${guestId}::uuid OR m.phase <> 'envio')
   `;
   return rows.length > 0;
 }

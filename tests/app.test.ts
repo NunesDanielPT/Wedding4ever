@@ -125,7 +125,7 @@ describe("criação de clientes", () => {
   test("cria base, missões, link, QR Code e PDF", async () => {
     const event = await createClient();
     expect(event.slug).toMatch(/^joao-ines-[a-z2-9]{6}$/);
-    expect(event.schema_version).toBe(3);
+    expect(event.schema_version).toBe(4);
     expect(event.status).toBe("rascunho");
     expect(await events.getEventStats(event.db_name)).toEqual({ missions: 7, guests: 0, photos: 0, photoLimit: 3 });
 
@@ -189,7 +189,7 @@ describe("ciclo de vida", () => {
     const event = await createClient();
     await events.migrateAllEvents();
     const after = (await events.getEventById(event.id))!;
-    expect(after.schema_version).toBe(3);
+    expect(after.schema_version).toBe(4);
     expect(after.migration_error).toBeNull();
     expect((await events.getEventStats(event.db_name)).missions).toBe(7);
   });
@@ -307,7 +307,7 @@ describe("noivos", () => {
 
 describe("definições", () => {
   test("aplica o limite predefinido aos novos clientes e permite ajustar cada um", async () => {
-    expect((await post("/admin/definicoes/fotos", { photoLimit: "11" })).status).toBe(422);
+    expect((await post("/admin/definicoes/fotos", { photoLimit: "51" })).status).toBe(422);
     expect((await post("/admin/definicoes/fotos", { photoLimit: "1" })).status).toBe(200);
     const event = await createClient();
     expect((await events.getEventStats(event.db_name)).photoLimit).toBe(1);
@@ -315,7 +315,7 @@ describe("definições", () => {
     await events.setEventStatus(event.id, "aberto");
     const joined = await post(`/e/${event.slug}/entrar`, { name: "Ana Reis", email: "ana@exemplo.pt" }, { Cookie: "" });
     const page = await handle(new Request(`${ORIGIN}/e/${event.slug}`, { headers: { Cookie: cookieOf(joined) } }));
-    expect(await page.text()).toContain("Podes enviar 1 fotografia por missão.");
+    expect(await page.text()).toContain("0/1");
 
     expect((await post(`/admin/clientes/${event.id}/limite-fotos`, { photoLimit: "2" })).status).toBe(303);
     expect((await events.getEventStats(event.db_name)).photoLimit).toBe(2);
@@ -442,6 +442,65 @@ describe("envio de e-mail", () => {
   });
 });
 
+const { setMissionPhase } = await import("../src/lib/missions");
+
+describe("missões de cada cliente", () => {
+  test("cria, edita, ordena e apaga sem mínimo nem máximo", async () => {
+    const event = await createClient();
+    const base = `/admin/clientes/${event.id}/missoes`;
+    const list = () => events.eventDb(event.db_name)`SELECT id, title, photo_limit, phase FROM missions ORDER BY position`;
+
+    for (const mission of await list()) expect((await post(`${base}/${mission.id}/apagar`, {})).status).toBe(303);
+    expect(await list()).toHaveLength(0);
+    expect(await (await get(base)).text()).toContain("ainda não tem missões");
+    const home = await post(`/e/${event.slug}/entrar`, { name: "Sem Missões", email: "s@exemplo.pt" }, { Cookie: "" });
+    await events.setEventStatus(event.id, "aberto");
+    const empty = await handle(new Request(`${ORIGIN}/e/${event.slug}`, { headers: { Cookie: cookieOf(home) } }));
+    expect(await empty.text()).toContain("Ainda não há missões");
+
+    for (let i = 0; i < 12; i++) expect((await post(base, { title: `Missão ${i}` })).status).toBe(303);
+    expect(await list()).toHaveLength(12);
+    expect((await post(base, { title: "" })).status).toBe(422);
+
+    const [first, second] = await list();
+    const saved = await post(`${base}/${second.id}/guardar`, { title: "Nova missão", photoLimit: "5", phase: "votacao" });
+    expect(saved.status).toBe(303);
+    await post(`${base}/${second.id}/subir`, {});
+    const reordered = await list();
+    expect(reordered[0]).toMatchObject({ id: second.id, title: "Nova missão", photo_limit: 5, phase: "votacao" });
+    expect(reordered[1].id).toBe(first.id);
+  });
+
+  test("exige confirmação para apagar uma missão com fotografias", async () => {
+    const event = await createClient();
+    await events.setEventStatus(event.id, "aberto");
+    const opened = (await events.getEventById(event.id))!;
+    const [mission] = await events.eventDb(opened.db_name)`SELECT id FROM missions ORDER BY position LIMIT 1`;
+    const guest = cookieOf(await post(`/e/${event.slug}/entrar`, { name: "Foto", email: "j@exemplo.pt" }, { Cookie: "" }));
+    const form = new FormData();
+    form.set("photo", new File([PNG_1X1], "a.png", { type: "image/png" }));
+    await handle(new Request(`${ORIGIN}/e/${event.slug}/missoes/${mission.id}/fotos`, { method: "POST", body: form, headers: { Origin: ORIGIN, Cookie: guest } }));
+
+    const base = `/admin/clientes/${event.id}/missoes/${mission.id}/apagar`;
+    expect((await post(base, {})).status).toBe(422);
+    expect((await post(base, { confirm: "on" })).status).toBe(303);
+    expect((await events.getEventStats(opened.db_name)).photos).toBe(0);
+  });
+
+  test("os noivos controlam a fase de cada missão", async () => {
+    const event = await createClient();
+    const page = await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text();
+    const code = page.match(/Código de acesso: <strong>([A-Z2-9]{10})</)![1]!;
+    const base = `/e/${event.slug}/noivos`;
+    const couple = cookieOf(await post(`${base}/entrar`, { email: event.couple_email, code }, { Cookie: "" }));
+    const [mission] = await events.eventDb(event.db_name)`SELECT id FROM missions ORDER BY position LIMIT 1`;
+    expect((await post(`${base}/missoes/${mission.id}/fase`, { phase: "votacao" }, { Cookie: couple })).status).toBe(303);
+    expect((await post(`${base}/missoes/${mission.id}/fase`, { phase: "votacao" }, { Cookie: "" })).status).toBe(401);
+    const [updated] = await events.eventDb(event.db_name)`SELECT phase FROM missions WHERE id = ${mission.id}::uuid`;
+    expect(updated.phase).toBe("votacao");
+  });
+});
+
 describe("envio de fotografias", () => {
   async function openEvent(limit: number) {
     const event = await createClient();
@@ -523,9 +582,72 @@ describe("envio de fotografias", () => {
     expect((await remove(owner)).status).toBe(303);
     expect((await events.getEventStats(event.db_name)).photos).toBe(0);
 
-    await events.setEventStatus(event.id, "votacao");
-    const closed = (await events.getEventById(event.id))!;
-    expect((await upload(closed, missionId, owner, PNG_1X1)).status).toBe(409);
+    await events.applyEventStatus(event, "votacao");
+    expect((await upload(event, missionId, owner, PNG_1X1)).status).toBe(409);
+  });
+
+  async function readyPhoto(event: { db_name: string }, count: number) {
+    for (let i = 0; i < 60; i++) {
+      const rows = await events.eventDb(event.db_name)`SELECT id FROM photos WHERE preview_status = 'ready'`;
+      if (rows.length >= count) return rows;
+      await Bun.sleep(100);
+    }
+    throw new Error("As miniaturas não ficaram prontas");
+  }
+
+  test("esconde as fotos dos outros até a missão entrar em votação", async () => {
+    const { event, missionId } = await openEvent(1);
+    const owner = await join(event.slug, "e@exemplo.pt");
+    const other = await join(event.slug, "f@exemplo.pt");
+    await upload(event, missionId, owner, PNG_1X1, "A minha legenda");
+    const [photo] = await readyPhoto(event, 1);
+
+    expect((await guestGet(`/e/${event.slug}/fotos/${photo.id}/thumb`, owner)).status).toBe(200);
+    expect((await guestGet(`/e/${event.slug}/fotos/${photo.id}/thumb`, other)).status).toBe(404);
+    expect((await guestGet(`/e/${event.slug}/fotos/${photo.id}/preview`, other)).status).toBe(404);
+    expect(await (await guestGet(`/e/${event.slug}/missoes/${missionId}`, other)).text()).not.toContain("A minha legenda");
+
+    await setMissionPhase(event.db_name, missionId, "votacao");
+    expect((await guestGet(`/e/${event.slug}/fotos/${photo.id}/thumb`, other)).status).toBe(200);
+    expect(await (await guestGet(`/e/${event.slug}/missoes/${missionId}`, other)).text()).toContain("A minha legenda");
+  });
+
+  test("vota por missão, sem autovoto, com troca de voto e vencedora no fim", async () => {
+    const { event, missionId } = await openEvent(1);
+    const [secondMission] = await events.eventDb(event.db_name)`SELECT id FROM missions WHERE id <> ${missionId}::uuid ORDER BY position LIMIT 1`;
+    const a = await join(event.slug, "g@exemplo.pt");
+    const b = await join(event.slug, "h@exemplo.pt");
+    const c = await join(event.slug, "i@exemplo.pt");
+    await upload(event, missionId, a, PNG_1X1);
+    await upload(event, missionId, b, PNG_1X1);
+    await upload(event, secondMission.id, a, PNG_1X1);
+    await readyPhoto(event, 3);
+    const rows = await events.eventDb(event.db_name)`
+      SELECT p.id, g.email FROM photos p JOIN guests g ON g.id = p.guest_id
+      WHERE p.mission_id = ${missionId}::uuid
+    `;
+    const photoA = rows.find((row: { email: string }) => row.email.startsWith("g"))!.id;
+    const photoB = rows.find((row: { email: string }) => row.email.startsWith("h"))!.id;
+    const vote = (guest: string, photo: string) => post(`/e/${event.slug}/fotos/${photo}/votar`, {}, { Cookie: guest });
+
+    expect((await vote(c, photoA)).status).toBe(422);
+    await setMissionPhase(event.db_name, missionId, "votacao");
+    expect((await vote(a, photoA)).status).toBe(422);
+    expect((await vote(c, photoA)).status).toBe(303);
+    expect((await vote(c, photoB)).status).toBe(303);
+    expect((await vote(a, photoB)).status).toBe(303);
+    const [{ count }] = await events.eventDb(event.db_name)`SELECT count(*)::int AS count FROM votes`;
+    expect(count).toBe(2);
+
+    const stillOpen = await (await guestGet(`/e/${event.slug}/missoes/${secondMission.id}`, b)).text();
+    expect(stillOpen).toContain("Enviar fotografia");
+    expect(await (await guestGet(`/e/${event.slug}/missoes/${missionId}`, c)).text()).not.toContain("2 votos");
+
+    await setMissionPhase(event.db_name, missionId, "encerrada");
+    expect((await vote(b, photoA)).status).toBe(422);
+    const results = await (await guestGet(`/e/${event.slug}/missoes/${missionId}`, c)).text();
+    expect(results).toContain("Vencedora");
+    expect(results).toContain("2 votos");
   });
 });
 

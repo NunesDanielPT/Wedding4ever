@@ -10,8 +10,8 @@ import {
   getEventStats,
   listEvents,
   listGuests,
+  applyEventStatus,
   saveEventDesign,
-  setEventStatus,
   setPhotoLimit,
   type EventRecord,
   type EventStatus,
@@ -22,6 +22,16 @@ import { cardsPdfResponse, eventUrl, qrPngResponse, qrSvgResponse, removeMedia, 
 import { generateCoupleCode } from "./lib/event-auth";
 import { imageExtensionOf, MAX_IMAGE_BYTES, toPdfImage } from "./lib/image";
 import { sendMail } from "./lib/mail";
+import {
+  addMission,
+  deleteMission,
+  listAdminMissions,
+  MAX_TITLE_LENGTH,
+  MISSION_PHASES,
+  moveMission,
+  updateMission,
+  type MissionPhase,
+} from "./lib/missions";
 import { getSettings, parsePhotoLimit, saveDefaultPhotoLimit, saveEmailSettings, type SmtpSecurity } from "./lib/settings";
 import { handleEvent } from "./routes/event";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./routes/http";
@@ -31,10 +41,11 @@ const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
   "/static/favicon.svg": "favicon.svg",
+  "/static/gallery.js": "gallery.js",
 };
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy":
-    "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   "Referrer-Policy": "same-origin",
   "X-Content-Type-Options": "nosniff",
   "X-Robots-Tag": "noindex",
@@ -113,6 +124,54 @@ async function handleDesign(req: Request, event: EventRecord): Promise<Response>
   return redirect(`/admin/clientes/${event.id}/personalizar`);
 }
 
+async function missionsPage(event: EventRecord, error?: string, status = 200): Promise<Response> {
+  return htmlResponse(admin.missionsPage(event, await listAdminMissions(event.db_name), error), status);
+}
+
+async function handleMissions(req: Request, event: EventRecord, action: string): Promise<Response> {
+  const back = redirect(`/admin/clientes/${event.id}/missoes`);
+  if (action === "missoes") {
+    if (req.method === "GET") return missionsPage(event);
+    if (req.method !== "POST") return notFound();
+    const title = field(await req.formData(), "title");
+    if (!title || title.length > MAX_TITLE_LENGTH) {
+      return missionsPage(event, `O nome da missão tem de ter entre 1 e ${MAX_TITLE_LENGTH} caracteres.`, 422);
+    }
+    await addMission(event.db_name, title, (await getSettings()).defaultPhotoLimit);
+    return back;
+  }
+
+  const match = action.match(/^missoes\/([0-9a-f-]{36})\/(guardar|subir|descer|apagar)$/);
+  if (!match || req.method !== "POST") return notFound();
+  const [, missionId, operation] = match as unknown as [string, string, string];
+
+  if (operation === "subir" || operation === "descer") {
+    await moveMission(event.db_name, missionId, operation === "subir" ? -1 : 1);
+    return back;
+  }
+  const form = await req.formData();
+  if (operation === "apagar") {
+    const mission = (await listAdminMissions(event.db_name)).find((item) => item.id === missionId);
+    if (!mission) return notFound();
+    if (mission.photos > 0 && !form.get("confirm")) {
+      return missionsPage(event, "Confirma que queres apagar a missão e as fotografias dela.", 422);
+    }
+    await deleteMission(event, missionId);
+    return back;
+  }
+
+  const title = field(form, "title");
+  const limit = parsePhotoLimit(field(form, "photoLimit"));
+  const phase = field(form, "phase") as MissionPhase;
+  if (!title || title.length > MAX_TITLE_LENGTH) {
+    return missionsPage(event, `O nome da missão tem de ter entre 1 e ${MAX_TITLE_LENGTH} caracteres.`, 422);
+  }
+  if (!limit) return missionsPage(event, "Escolhe um limite de fotografias entre 1 e 50.", 422);
+  if (!MISSION_PHASES.includes(phase)) return missionsPage(event, "Escolhe uma fase válida.", 422);
+  await updateMission(event.db_name, missionId, title, limit, phase);
+  return back;
+}
+
 function emailInput(form: FormData) {
   return {
     enabled: form.get("enabled") !== null,
@@ -146,7 +205,7 @@ async function handleSettings(req: Request, path: string): Promise<Response> {
 
   if (path === "/admin/definicoes/fotos") {
     const limit = parsePhotoLimit(field(form, "photoLimit"));
-    if (!limit) return settingsPage({ error: "Escolhe um limite de fotografias entre 1 e 10." }, 422);
+    if (!limit) return settingsPage({ error: "Escolhe um limite de fotografias entre 1 e 50." }, 422);
     await saveDefaultPhotoLimit(limit);
     return settingsPage({ success: "Limite predefinido guardado. Aplica-se aos novos clientes." });
   }
@@ -232,7 +291,7 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     }
   }
 
-  const match = path.match(/^\/admin\/clientes\/([0-9a-f-]{36})(?:\/([a-z.-]+))?$/);
+  const match = path.match(/^\/admin\/clientes\/([0-9a-f-]{36})(?:\/([a-z0-9./-]+))?$/);
   if (!match) return notFound();
   const [, id, action] = match as unknown as [string, string, string | undefined];
 
@@ -256,9 +315,14 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     const event = await getEventById(id);
     if (!event) return notFound();
     const limit = parsePhotoLimit(field(await req.formData(), "photoLimit"));
-    if (!limit) return eventDetail(id, "Escolhe um limite de fotografias entre 1 e 10.", 422);
+    if (!limit) return eventDetail(id, "Escolhe um limite de fotografias entre 1 e 50.", 422);
     await setPhotoLimit(event.db_name, limit);
-    return redirect(`/admin/clientes/${id}`);
+    return redirect(`/admin/clientes/${id}/missoes`);
+  }
+
+  if (action === "missoes" || action?.startsWith("missoes/")) {
+    const event = await getEventById(id);
+    return event ? handleMissions(req, event, action) : notFound();
   }
 
   if (action === "codigo-noivos" && req.method === "POST") {
@@ -269,8 +333,9 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
   if (action === "estado" && req.method === "POST") {
     const status = field(await req.formData(), "status");
     if (!EVENT_STATUSES.includes(status as EventStatus)) return eventDetail(id, "Escolhe um estado válido.", 422);
-    if (!(await getEventById(id))) return notFound();
-    await setEventStatus(id, status as EventStatus);
+    const event = await getEventById(id);
+    if (!event) return notFound();
+    await applyEventStatus(event, status as EventStatus);
     return redirect(`/admin/clientes/${id}`);
   }
 

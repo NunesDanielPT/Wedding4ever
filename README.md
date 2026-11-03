@@ -12,12 +12,14 @@ Já disponível:
 - Cartões em PDF e QR Code em PNG e SVG
 - Área dos noivos em `/e/<link>/noivos`, com e-mail e código de acesso gerado no painel
 - Entrada dos convidados com nome e e-mail e lista de missões
-- Envio de fotografias JPG, PNG e HEIC, com legenda, miniaturas e galeria por missão
-- Limite de fotografias por pessoa, predefinido em Definições e ajustável em cada cliente
+- Envio de fotografias JPG, PNG e HEIC, com legenda e miniaturas
+- Missões por cliente, sem mínimo nem máximo, com sugestões, escrita livre e limite próprio
+- Fases por missão: envio, votação e encerrada
+- Galeria em ecrã inteiro com deslize, um voto por missão e vencedora
 - Configuração do serviço de e-mail por SMTP, com envio de teste
 - Migrações automáticas em todas as bases
 
-Ainda por fazer: ranking, moderação, votação, e-mails automáticos e exportação em ZIP.
+Ainda por fazer: ranking, moderação, e-mails automáticos e exportação em ZIP.
 
 ## Tecnologia
 
