@@ -34,6 +34,7 @@ a { color: var(--navy); text-underline-offset: 3px; }
 .brand-large { font-size: 1.7rem; margin-bottom: 2rem; }
 
 .topbar { align-items: center; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; padding: .85rem clamp(1rem, 4vw, 2.5rem); }
+.topnav { align-items: center; display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; justify-content: flex-end; }
 .admin { margin: 0 auto; max-width: 1040px; padding: 2.25rem clamp(1rem, 4vw, 2.5rem) 4rem; }
 .page-head { align-items: center; display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; margin-bottom: 2rem; }
 .back { color: var(--ink-soft); display: inline-block; font-size: .92rem; margin-bottom: 1.25rem; }
@@ -136,6 +137,10 @@ body.themed { background-color: var(--t-bg); color: var(--t-text); }
 .couple-panel .card-date { margin-bottom: 0; }
 .couple-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .downloads { display: grid; gap: .45rem; margin: 0; }
+.settings { display: grid; gap: 2.5rem; max-width: 680px; }
+.settings h2 { font-size: 1.4rem; }
+.narrow-form { max-width: 340px; }
+.test-form { margin-top: 1.25rem; }
 .notice { background: #eef0e3; border-left: 3px solid var(--olive); padding: .6rem .8rem; }
 fieldset { border: 1px solid var(--line); display: grid; gap: .9rem; margin: 0; padding: 1rem; }
 legend { color: var(--navy); font-family: var(--serif); font-size: 1.1rem; padding: 0 .35rem; }

@@ -127,7 +127,7 @@ describe("criação de clientes", () => {
     expect(event.slug).toMatch(/^joao-ines-[a-z2-9]{6}$/);
     expect(event.schema_version).toBe(2);
     expect(event.status).toBe("rascunho");
-    expect(await events.getEventStats(event.db_name)).toEqual({ missions: 7, guests: 0, photos: 0 });
+    expect(await events.getEventStats(event.db_name)).toEqual({ missions: 7, guests: 0, photos: 0, photoLimit: 3 });
 
     const qr = await get(`/admin/clientes/${event.id}/qr.svg`);
     expect(qr.headers.get("content-type")).toContain("image/svg+xml");
@@ -302,5 +302,142 @@ describe("noivos", () => {
     await post(`/admin/clientes/${event.id}/codigo-noivos`, {});
     const revoked = await handle(new Request(`${ORIGIN}${base}`, { headers: { Cookie: coupleCookie } }));
     expect(await revoked.text()).toContain("Código de acesso");
+  });
+});
+
+describe("definições", () => {
+  test("aplica o limite predefinido aos novos clientes e permite ajustar cada um", async () => {
+    expect((await post("/admin/definicoes/fotos", { photoLimit: "11" })).status).toBe(422);
+    expect((await post("/admin/definicoes/fotos", { photoLimit: "1" })).status).toBe(200);
+    const event = await createClient();
+    expect((await events.getEventStats(event.db_name)).photoLimit).toBe(1);
+
+    await events.setEventStatus(event.id, "aberto");
+    const joined = await post(`/e/${event.slug}/entrar`, { name: "Ana Reis", email: "ana@exemplo.pt" }, { Cookie: "" });
+    const page = await handle(new Request(`${ORIGIN}/e/${event.slug}`, { headers: { Cookie: cookieOf(joined) } }));
+    expect(await page.text()).toContain("Podes enviar 1 fotografia por missão.");
+
+    expect((await post(`/admin/clientes/${event.id}/limite-fotos`, { photoLimit: "2" })).status).toBe(303);
+    expect((await events.getEventStats(event.db_name)).photoLimit).toBe(2);
+    await post("/admin/definicoes/fotos", { photoLimit: "3" });
+  });
+
+  test("guarda o e-mail desligado e nunca devolve a palavra-passe", async () => {
+    const page = await get("/admin/definicoes");
+    expect(await page.text()).toContain("Desligado.");
+
+    const fields = {
+      host: "smtp.exemplo.pt", port: "587", security: "starttls", username: "conta",
+      password: "segredo-muito-forte", fromName: "Wedding4Ever", fromAddress: "ola@exemplo.pt",
+    };
+    expect((await post("/admin/definicoes/email", { ...fields, enabled: "on" })).status).toBe(200);
+    expect((await post("/admin/definicoes/email", { ...fields, password: "", enabled: "on" })).status).toBe(200);
+
+    const { getSettings } = await import("../src/lib/settings");
+    const { decryptSecret } = await import("../src/lib/secret");
+    const { email } = await getSettings();
+    expect(email.enabled).toBe(true);
+    expect(email.passwordEncrypted).not.toContain("segredo");
+    expect(decryptSecret(email.passwordEncrypted)).toBe("segredo-muito-forte");
+    const body = await (await get("/admin/definicoes")).text();
+    expect(body).not.toContain("segredo-muito-forte");
+    expect(body).not.toContain(email.passwordEncrypted);
+
+    await post("/admin/definicoes/email", { ...fields, password: "" });
+    expect((await getSettings()).email.enabled).toBe(false);
+  });
+});
+
+describe("envio de e-mail", () => {
+  async function selfSigned() {
+    const dir = join(storage, "cert");
+    await Bun.spawn(["mkdir", "-p", dir]).exited;
+    await Bun.spawn(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", `${dir}/k.pem`, "-out", `${dir}/c.pem`, "-days", "1", "-subj", "/CN=localhost"], { stderr: "ignore" }).exited;
+    return { key: await Bun.file(`${dir}/k.pem`).text(), cert: await Bun.file(`${dir}/c.pem`).text() };
+  }
+
+  /** Servidor SMTP mínimo, com a mesma sequência de comandos de um fornecedor real. */
+  function smtpServer(credentials: { key: string; cert: string }, implicitTls: boolean) {
+    const received: string[] = [];
+    const net = require("node:net");
+    const tls = require("node:tls");
+    const serve = (socket: any, secure: boolean) => {
+      let inData = false;
+      let buffer = "";
+      socket.setEncoding("utf8");
+      socket.on("error", () => {});
+      socket.write("220 teste\r\n");
+      const onData = (chunk: string) => {
+        buffer += chunk;
+        let index: number;
+        while ((index = buffer.indexOf("\r\n")) >= 0) {
+          const line = buffer.slice(0, index);
+          buffer = buffer.slice(index + 2);
+          received.push(line);
+          if (inData) {
+            if (line === ".") { inData = false; socket.write("250 aceite\r\n"); }
+          } else if (line.startsWith("EHLO")) {
+            socket.write(`250-teste\r\n${secure ? "" : "250-STARTTLS\r\n"}250 AUTH PLAIN\r\n`);
+          } else if (line === "STARTTLS") {
+            socket.off("data", onData);
+            socket.write("220 pronto\r\n", () => {
+              const upgraded = new tls.TLSSocket(socket, { isServer: true, ...credentials });
+              upgraded.once("secure", () => {});
+              upgradedServe(upgraded);
+            });
+          } else if (line.startsWith("AUTH")) socket.write("235 ok\r\n");
+          else if (line === "DATA") { inData = true; socket.write("354 envia\r\n"); }
+          else if (line === "QUIT") { socket.write("221 adeus\r\n"); socket.end(); }
+          else socket.write("250 ok\r\n");
+        }
+      };
+      socket.on("data", onData);
+    };
+    const upgradedServe = (socket: any) => {
+      let inData = false;
+      let buffer = "";
+      socket.setEncoding("utf8");
+      socket.on("error", () => {});
+      socket.on("data", (chunk: string) => {
+        buffer += chunk;
+        let index: number;
+        while ((index = buffer.indexOf("\r\n")) >= 0) {
+          const line = buffer.slice(0, index);
+          buffer = buffer.slice(index + 2);
+          received.push(line);
+          if (inData) {
+            if (line === ".") { inData = false; socket.write("250 aceite\r\n"); }
+          } else if (line.startsWith("EHLO")) socket.write("250-teste\r\n250 AUTH PLAIN\r\n");
+          else if (line.startsWith("AUTH")) socket.write("235 ok\r\n");
+          else if (line === "DATA") { inData = true; socket.write("354 envia\r\n"); }
+          else if (line === "QUIT") { socket.write("221 adeus\r\n"); socket.end(); }
+          else socket.write("250 ok\r\n");
+        }
+      });
+    };
+    const server = implicitTls
+      ? tls.createServer(credentials, (socket: any) => serve(socket, true))
+      : net.createServer((socket: any) => serve(socket, false));
+    return new Promise<{ server: any; port: number; received: string[] }>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port, received }));
+    });
+  }
+
+  test.each(["tls", "starttls"] as const)("entrega uma mensagem por %s", async (security) => {
+    const { sendMail } = await import("../src/lib/mail");
+    const { encryptSecret } = await import("../src/lib/secret");
+    const smtp = await smtpServer(await selfSigned(), security === "tls");
+    await sendMail(
+      {
+        enabled: true, host: "127.0.0.1", port: smtp.port, security, username: "conta",
+        passwordEncrypted: encryptSecret("chave"), fromName: "Wedding4Ever", fromAddress: "ola@exemplo.pt",
+      },
+      { to: "ana@exemplo.pt", subject: "Olá João\r\nBcc: x@y.z", text: "Mensagem" },
+      { rejectUnauthorized: false },
+    );
+    smtp.server.close();
+    expect(smtp.received).toContain("RCPT TO:<ana@exemplo.pt>");
+    expect(smtp.received.some((line) => line.startsWith("Subject: =?UTF-8?B?"))).toBe(true);
+    expect(smtp.received).not.toContain("Bcc: x@y.z");
   });
 });

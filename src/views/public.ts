@@ -58,6 +58,7 @@ export function guestHomePage(event: EventRecord, guest: Guest, missions: Missio
       <p>Olá, ${guest.full_name}. ${MESSAGES[event.status]}</p>
       ${event.status !== "rascunho" && event.status !== "arquivado" && html`
         <h2>A sua missão</h2>
+        ${missions[0] && html`<p>${missions[0].photo_limit === 1 ? "Podes enviar 1 fotografia por missão." : `Podes enviar até ${missions[0].photo_limit} fotografias por missão.`}</p>`}
         <ul class="mission-list">
           ${missions.map((mission) => html`<li>${mission.title}</li>`)}
         </ul>`}

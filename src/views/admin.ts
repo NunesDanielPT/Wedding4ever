@@ -3,6 +3,7 @@ import type { Design } from "../lib/design";
 import { eventUrl } from "../lib/event-assets";
 import { coupleNames, formatDate, initial } from "../lib/format";
 import { html, Html } from "../lib/html";
+import { MAX_PHOTO_LIMIT, MIN_PHOTO_LIMIT, type PlatformSettings } from "../lib/settings";
 import { page, rings } from "./layout";
 
 export const STATUS_LABELS: Record<EventStatus, string> = {
@@ -17,7 +18,11 @@ function shell(title: string, content: Html, stylesheet?: string): string {
   return page(`${title} | Wedding4Ever`, html`
     <header class="topbar">
       <a class="brand" href="/admin">${rings}<span>Wedding4Ever</span></a>
-      <form method="post" action="/admin/sair"><button class="link-button">Sair</button></form>
+      <nav class="topnav">
+        <a href="/admin">Clientes</a>
+        <a href="/admin/definicoes">Definições</a>
+        <form method="post" action="/admin/sair"><button class="link-button">Sair</button></form>
+      </nav>
     </header>
     <main class="admin">${content}</main>
   `, "", stylesheet);
@@ -113,6 +118,14 @@ export function eventPage(event: EventRecord, stats: EventStats | null, error?: 
           <input class="copy-field" readonly value="${url}" aria-label="Link dos convidados">
           <a href="${url}" target="_blank" rel="noopener">Abrir como convidado</a>
         </section>
+
+        ${stats && html`<section>
+          <h2>Fotografias por pessoa em cada missão</h2>
+          <form method="post" action="/admin/clientes/${event.id}/limite-fotos" class="inline-form">
+            <input type="number" name="photoLimit" min="${MIN_PHOTO_LIMIT}" max="${MAX_PHOTO_LIMIT}" value="${stats.photoLimit}" required aria-label="Fotografias por pessoa em cada missão">
+            <button>Guardar limite</button>
+          </form>
+        </section>`}
 
         <section>
           <h2>Acesso dos noivos</h2>
@@ -221,4 +234,63 @@ export function designPage(event: EventRecord, design: Design, error?: string): 
       <a href="/admin/clientes/${event.id}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
     </p>
   `, `/e/${event.slug}/tema.css`);
+}
+
+export interface SettingsNotice {
+  success?: string;
+  error?: string;
+}
+
+export function settingsPage(settings: PlatformSettings, adminEmail: string, notice: SettingsNotice = {}): string {
+  const { email } = settings;
+  const selected = (value: string) => (email.security === value ? new Html("selected") : "");
+  return shell("Definições", html`
+    <h1>Definições</h1>
+    <p class="lead">Estas opções aplicam-se a toda a plataforma.</p>
+    ${notice.error && html`<p class="error" role="alert">${notice.error}</p>`}
+    ${notice.success && html`<p class="notice" role="status">${notice.success}</p>`}
+
+    <div class="settings">
+      <section>
+        <h2>Fotografias por pessoa</h2>
+        <p>Limite predefinido em cada missão para os novos clientes. Podes alterá-lo em cada cliente.</p>
+        <form method="post" action="/admin/definicoes/fotos" class="inline-form narrow-form">
+          <input type="number" name="photoLimit" min="${MIN_PHOTO_LIMIT}" max="${MAX_PHOTO_LIMIT}" value="${settings.defaultPhotoLimit}" required aria-label="Limite predefinido de fotografias">
+          <button>Guardar limite</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Serviço de e-mail</h2>
+        <p>${email.enabled ? "Ativo." : "Desligado."} Usa os dados SMTP do teu fornecedor. A plataforma ainda não envia e-mails automáticos; por agora, só o teste abaixo envia.</p>
+        <form method="post" action="/admin/definicoes/email" class="stack">
+          <label class="check"><input type="checkbox" name="enabled" ${email.enabled ? new Html("checked") : ""}> Ativar o serviço de e-mail</label>
+          <div class="pair">
+            <label>Servidor SMTP<input name="host" autocomplete="off" value="${email.host}"></label>
+            <label>Porta<input type="number" name="port" min="1" max="65535" value="${email.port}"></label>
+          </div>
+          <label>Segurança
+            <select name="security">
+              <option value="starttls" ${selected("starttls")}>STARTTLS, normalmente na porta 587</option>
+              <option value="tls" ${selected("tls")}>TLS, normalmente na porta 465</option>
+            </select>
+          </label>
+          <div class="pair">
+            <label>Utilizador<input name="username" autocomplete="off" value="${email.username}"></label>
+            <label>Palavra-passe ou chave<input type="password" name="password" autocomplete="new-password" placeholder="${email.passwordEncrypted ? "Guardada. Deixa em branco para manter." : ""}"></label>
+          </div>
+          <div class="pair">
+            <label>Nome de envio<input name="fromName" maxlength="100" value="${email.fromName}"></label>
+            <label>E-mail de envio<input type="email" name="fromAddress" value="${email.fromAddress}"></label>
+          </div>
+          <button class="primary">Guardar serviço de e-mail</button>
+        </form>
+
+        <form method="post" action="/admin/definicoes/email/testar" class="inline-form test-form">
+          <input type="email" name="to" value="${adminEmail}" required aria-label="E-mail para o teste">
+          <button>Enviar e-mail de teste</button>
+        </form>
+      </section>
+    </div>
+  `);
 }

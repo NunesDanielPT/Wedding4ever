@@ -11,6 +11,7 @@ import {
   listEvents,
   saveEventDesign,
   setEventStatus,
+  setPhotoLimit,
   type EventRecord,
   type EventStatus,
 } from "./db/events";
@@ -19,6 +20,8 @@ import { resolveDesign, validateDesign, type Design } from "./lib/design";
 import { cardsPdfResponse, eventUrl, qrPngResponse, qrSvgResponse, removeMedia, saveMedia, type MediaKind } from "./lib/event-assets";
 import { generateCoupleCode } from "./lib/event-auth";
 import { imageExtensionOf, MAX_IMAGE_BYTES, toPdfImage } from "./lib/image";
+import { sendMail } from "./lib/mail";
+import { getSettings, parsePhotoLimit, saveDefaultPhotoLimit, saveEmailSettings, type SmtpSecurity } from "./lib/settings";
 import { handleEvent } from "./routes/event";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./routes/http";
 import * as admin from "./views/admin";
@@ -109,6 +112,72 @@ async function handleDesign(req: Request, event: EventRecord): Promise<Response>
   return redirect(`/admin/clientes/${event.id}/personalizar`);
 }
 
+function emailInput(form: FormData) {
+  return {
+    enabled: form.get("enabled") !== null,
+    host: field(form, "host"),
+    port: Number(field(form, "port")),
+    security: (field(form, "security") === "tls" ? "tls" : "starttls") as SmtpSecurity,
+    username: field(form, "username"),
+    password: String(form.get("password") ?? ""),
+    fromName: field(form, "fromName"),
+    fromAddress: field(form, "fromAddress").toLowerCase(),
+  };
+}
+
+function validateEmailSettings(input: ReturnType<typeof emailInput>): string | undefined {
+  if (!input.enabled && !input.host && !input.fromAddress) return undefined;
+  if (!/^[a-zA-Z0-9.-]+$/.test(input.host)) return "Indica o servidor SMTP.";
+  if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535) return "Indica uma porta válida.";
+  if (!isEmail(input.fromAddress)) return "Indica um e-mail de envio válido.";
+  if (input.username.length > 200 || input.fromName.length > 100) return "Encurta o utilizador ou o nome de envio.";
+  return undefined;
+}
+
+async function settingsPage(notice?: admin.SettingsNotice, status = 200): Promise<Response> {
+  return htmlResponse(admin.settingsPage(await getSettings(), config.adminEmail, notice), status);
+}
+
+async function handleSettings(req: Request, path: string): Promise<Response> {
+  if (path === "/admin/definicoes" && req.method === "GET") return settingsPage();
+  if (req.method !== "POST") return notFound();
+  const form = await req.formData();
+
+  if (path === "/admin/definicoes/fotos") {
+    const limit = parsePhotoLimit(field(form, "photoLimit"));
+    if (!limit) return settingsPage({ error: "Escolhe um limite de fotografias entre 1 e 10." }, 422);
+    await saveDefaultPhotoLimit(limit);
+    return settingsPage({ success: "Limite predefinido guardado. Aplica-se aos novos clientes." });
+  }
+
+  if (path === "/admin/definicoes/email") {
+    const input = emailInput(form);
+    const error = validateEmailSettings(input);
+    if (error) return settingsPage({ error }, 422);
+    await saveEmailSettings(input);
+    return settingsPage({ success: "Serviço de e-mail guardado." });
+  }
+
+  if (path === "/admin/definicoes/email/testar") {
+    const to = field(form, "to").toLowerCase();
+    const { email } = await getSettings();
+    if (!isEmail(to)) return settingsPage({ error: "Indica um e-mail válido para o teste." }, 422);
+    if (!email.host || !email.fromAddress) return settingsPage({ error: "Guarda primeiro os dados do serviço de e-mail." }, 422);
+    try {
+      await sendMail(email, {
+        to,
+        subject: "Teste do Wedding4Ever",
+        text: "Este e-mail confirma que o serviço de e-mail está a funcionar.",
+      });
+      return settingsPage({ success: `E-mail de teste enviado para ${to}.` });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      return settingsPage({ error: `O teste falhou: ${message}` }, 502);
+    }
+  }
+  return notFound();
+}
+
 async function handleAdminLogin(req: Request): Promise<Response> {
   if (req.method === "GET") {
     if (await isAuthenticated(req)) return redirect("/admin");
@@ -137,6 +206,7 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     await logout(req);
     return redirect("/admin/entrar", { "Set-Cookie": sessionCookie(null) });
   }
+  if (path === "/admin/definicoes" || path.startsWith("/admin/definicoes/")) return handleSettings(req, path);
   if (path === "/admin" && req.method === "GET") return htmlResponse(admin.dashboardPage(await listEvents()));
   if (path === "/admin/clientes/novo" && req.method === "GET") return htmlResponse(admin.newEventPage());
 
@@ -152,7 +222,8 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     const error = validateEvent(values);
     if (error) return htmlResponse(admin.newEventPage(values, error), 422);
     try {
-      const event = await createEvent(values);
+      const { defaultPhotoLimit } = await getSettings();
+      const event = await createEvent({ ...values, photoLimit: defaultPhotoLimit });
       return redirect(`/admin/clientes/${event.id}`);
     } catch (cause) {
       console.error("Falha ao criar cliente", cause);
@@ -178,6 +249,15 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
   if (action === "personalizar" && req.method === "POST") {
     const event = await getEventById(id);
     return event ? handleDesign(req, event) : notFound();
+  }
+
+  if (action === "limite-fotos" && req.method === "POST") {
+    const event = await getEventById(id);
+    if (!event) return notFound();
+    const limit = parsePhotoLimit(field(await req.formData(), "photoLimit"));
+    if (!limit) return eventDetail(id, "Escolhe um limite de fotografias entre 1 e 10.", 422);
+    await setPhotoLimit(event.db_name, limit);
+    return redirect(`/admin/clientes/${id}`);
   }
 
   if (action === "codigo-noivos" && req.method === "POST") {

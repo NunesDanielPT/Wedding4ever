@@ -12,9 +12,11 @@ Já disponível:
 - Cartões em PDF e QR Code em PNG e SVG
 - Área dos noivos em `/e/<link>/noivos`, com e-mail e código de acesso gerado no painel
 - Entrada dos convidados com nome e e-mail e lista de missões
+- Limite de fotografias por pessoa, predefinido em Definições e ajustável em cada cliente
+- Configuração do serviço de e-mail por SMTP, com envio de teste
 - Migrações automáticas em todas as bases
 
-Ainda por fazer: envio de fotografias, ranking, moderação, votação, e-mails e exportação em ZIP.
+Ainda por fazer: envio de fotografias, ranking, moderação, votação, e-mails automáticos e exportação em ZIP.
 
 ## Tecnologia
 
@@ -43,7 +45,7 @@ TEST_POSTGRES_URL=postgres://postgres:test@127.0.0.1:5432/postgres bun test
 
 O servidor constrói a aplicação para o seu próprio processador. Para atualizar, usa **Pull and redeploy** na stack.
 
-`APP_SECRET` tem pelo menos 32 caracteres e não pode mudar depois de criares clientes. `PUBLIC_URL` tem de ser igual ao endereço usado no browser.
+`APP_SECRET` tem pelo menos 32 caracteres e não pode mudar depois de criares clientes, porque protege também a palavra-passe do e-mail. `PUBLIC_URL` tem de ser igual ao endereço usado no browser.
 
 ## Alterar a base de dados
 

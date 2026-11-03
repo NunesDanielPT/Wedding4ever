@@ -32,6 +32,7 @@ export interface NewEvent {
   eventDate: string;
   venue: string;
   coupleEmail: string;
+  photoLimit: number;
 }
 
 export const DEFAULT_MISSIONS = [
@@ -134,7 +135,7 @@ export async function createEvent(input: NewEvent): Promise<EventRecord> {
     const schemaVersion = await migrate(db, "event");
     await db.begin(async (tx) => {
       for (const [position, title] of DEFAULT_MISSIONS.entries()) {
-        await tx`INSERT INTO missions (title, position) VALUES (${title}, ${position})`;
+        await tx`INSERT INTO missions (title, position, photo_limit) VALUES (${title}, ${position}, ${input.photoLimit})`;
       }
     });
 
@@ -187,6 +188,11 @@ export async function saveEventDesign(id: string, design: Design): Promise<void>
   `;
 }
 
+/** Aplica o limite a todas as missões do evento. */
+export async function setPhotoLimit(dbName: string, limit: number): Promise<void> {
+  await eventDb(dbName)`UPDATE missions SET photo_limit = ${limit}`;
+}
+
 export interface Mission {
   id: string;
   title: string;
@@ -210,13 +216,15 @@ export interface EventStats {
   missions: number;
   guests: number;
   photos: number;
+  photoLimit: number;
 }
 
 export async function getEventStats(dbName: string): Promise<EventStats> {
   const rows: EventStats[] = await eventDb(dbName)`
     SELECT (SELECT count(*)::int FROM missions) AS missions,
            (SELECT count(*)::int FROM guests) AS guests,
-           (SELECT count(*)::int FROM photos) AS photos
+           (SELECT count(*)::int FROM photos) AS photos,
+           (SELECT COALESCE(max(photo_limit), 3)::int FROM missions) AS "photoLimit"
   `;
   return rows[0]!;
 }
