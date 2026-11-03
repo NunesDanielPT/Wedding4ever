@@ -85,20 +85,28 @@ export interface Guest {
   full_name: string;
 }
 
-/** Regista o convidado ou reabre a sessão de quem volta com o mesmo e-mail. */
+export class GuestLimitError extends Error {}
+
+/** Regista o convidado dentro do limite do pack; quem já tem conta pode voltar sempre. */
 export async function joinGuest(event: EventRecord, name: string, email: string): Promise<string> {
   const db = eventDb(event.db_name);
-  const [guest]: { id: string }[] = await db`
-    INSERT INTO guests (full_name, email) VALUES (${name}, ${email})
-    ON CONFLICT (lower(email)) DO UPDATE SET email = guests.email
-    RETURNING id
-  `;
   const token = newToken();
-  await db`DELETE FROM guest_sessions WHERE expires_at < now()`;
-  await db`
-    INSERT INTO guest_sessions (token_hash, guest_id, expires_at)
-    VALUES (${hashToken(token)}, ${guest!.id}::uuid, ${expiry()})
-  `;
+  await db.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext('guest-limit'))`;
+    let rows: { id: string }[] = await tx`SELECT id FROM guests WHERE lower(email) = lower(${email})`;
+    if (rows.length === 0) {
+      if (event.guest_limit !== null) {
+        const [row]: { count: number }[] = await tx`SELECT count(*)::int AS count FROM guests`;
+        if (row!.count >= event.guest_limit) throw new GuestLimitError();
+      }
+      rows = await tx`INSERT INTO guests (full_name, email) VALUES (${name}, ${email}) RETURNING id`;
+    }
+    await tx`DELETE FROM guest_sessions WHERE expires_at < now()`;
+    await tx`
+      INSERT INTO guest_sessions (token_hash, guest_id, expires_at)
+      VALUES (${hashToken(token)}, ${rows[0]!.id}::uuid, ${expiry()})
+    `;
+  });
   return token;
 }
 

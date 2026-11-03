@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { config } from "../config";
 import { central } from "../db/central";
 
-export type FieldType = "text" | "textarea" | "url" | "image" | "checkbox";
+export type FieldType = "text" | "textarea" | "url" | "image" | "checkbox" | "number";
 
 export interface SiteField {
   name: string;
@@ -76,7 +76,8 @@ export const SITE_COLLECTIONS: Record<string, { title: string; add: string; fiel
     add: "Adicionar pack",
     fields: [
       { name: "name", label: "Nome", type: "text", required: true },
-      { name: "guests", label: "Convidados", type: "text", required: true },
+      { name: "guests", label: "Texto dos convidados", type: "text", required: true },
+      { name: "maxGuests", label: "Máximo de convidados", type: "number", hint: "Em branco fica sem limite" },
       { name: "price", label: "Preço", type: "text", hint: "Em branco aparece “Sob consulta”" },
       { name: "features", label: "O que inclui, uma linha por item", type: "textarea", required: true },
       { name: "highlight", label: "Destacar este pack", type: "checkbox" },
@@ -92,8 +93,8 @@ const PACK_FEATURES = [
   "Download do álbum em ZIP",
 ].join("\n");
 
-const pack = (id: string, name: string, guests: string): SiteItem => ({
-  id, name, guests, price: "", features: PACK_FEATURES, highlight: "",
+const pack = (id: string, name: string, guests: string, maxGuests: string): SiteItem => ({
+  id, name, guests, maxGuests, price: "", features: PACK_FEATURES, highlight: "",
 });
 
 export interface Site {
@@ -133,17 +134,22 @@ const DEFAULT_SITE: Site = {
   testimonials: [],
   ads: [],
   packs: [
-    pack("p1", "Essencial", "Até 100 convidados"),
-    pack("p2", "Clássico", "Até 150 convidados"),
-    pack("p3", "Grande festa", "Até 200 convidados"),
-    pack("p4", "Sem limites", "300 ou mais convidados"),
+    pack("p1", "Essencial", "Até 100 convidados", "100"),
+    pack("p2", "Clássico", "Até 150 convidados", "150"),
+    pack("p3", "Grande festa", "Até 200 convidados", "200"),
+    pack("p4", "Sem limites", "300 ou mais convidados", ""),
   ],
 };
 
 export async function getSite(): Promise<Site> {
   const rows: { value: Partial<Site> }[] = await central`SELECT value FROM settings WHERE key = 'site'`;
   const stored = rows[0]?.value ?? {};
-  return { ...DEFAULT_SITE, ...stored, texts: { ...DEFAULT_SITE.texts, ...stored.texts } };
+  const site = { ...DEFAULT_SITE, ...stored, texts: { ...DEFAULT_SITE.texts, ...stored.texts } };
+  const packs = site.packs.map((item) => ({
+    ...item,
+    maxGuests: item.maxGuests ?? DEFAULT_SITE.packs.find((base) => base.id === item.id)?.maxGuests ?? "",
+  }));
+  return { ...site, packs };
 }
 
 export async function saveSite(site: Site): Promise<void> {

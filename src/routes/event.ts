@@ -1,7 +1,7 @@
 import { eventDesign, getEventBySlug, listMissions, type EventRecord } from "../db/events";
 import { themeCss } from "../lib/design";
 import { mediaPath } from "../lib/event-assets";
-import { currentGuest, guestCookie, joinGuest, type Guest } from "../lib/event-auth";
+import { currentGuest, guestCookie, GuestLimitError, joinGuest, type Guest } from "../lib/event-auth";
 import { getWinners } from "../lib/missions";
 import {
   canViewPhoto,
@@ -113,8 +113,15 @@ async function handleJoin(req: Request, event: EventRecord): Promise<Response> {
   const values = { name, email };
   if (name.length < 2 || name.length > 80) return htmlResponse(joinPage(event, values, "Indica o teu nome completo."), 422);
   if (!isEmail(email)) return htmlResponse(joinPage(event, values, "Indica um e-mail válido."), 422);
-  const token = await joinGuest(event, name, email);
-  return redirect(`/e/${event.slug}`, { "Set-Cookie": guestCookie(event.slug, token) });
+  try {
+    const token = await joinGuest(event, name, email);
+    return redirect(`/e/${event.slug}`, { "Set-Cookie": guestCookie(event.slug, token) });
+  } catch (cause) {
+    if (cause instanceof GuestLimitError) {
+      return htmlResponse(joinPage(event, values, "Este evento já atingiu o número máximo de convidados. Fala com os noivos."), 409);
+    }
+    throw cause;
+  }
 }
 
 export async function handleEvent(req: Request, path: string): Promise<Response | undefined> {

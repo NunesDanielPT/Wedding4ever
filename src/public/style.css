@@ -68,7 +68,7 @@ button, .primary {
 .link-button { background: none; border: 0; min-height: 0; padding: .25rem; text-decoration: underline; text-underline-offset: 3px; }
 
 .stack { display: grid; gap: 1rem; }
-.stack .primary { justify-self: start; }
+.stack .primary, .pack-save { justify-self: start; }
 .narrow { max-width: 560px; }
 .pair { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; }
 .inline-form { display: flex; gap: .6rem; }

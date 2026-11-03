@@ -18,7 +18,7 @@ function fieldInput(item: SiteField, value = ""): Html {
   if (item.type === "textarea") {
     return html`<label>${item.label}<textarea name="${item.name}" rows="4" ${required}>${value}</textarea>${hint}</label>`;
   }
-  return html`<label>${item.label}<input type="${item.type === "url" ? "url" : "text"}" name="${item.name}" value="${value}" ${required}>${hint}</label>`;
+  return html`<label>${item.label}<input type="${item.type === "text" ? "text" : item.type}" name="${item.name}" value="${value}" ${item.type === "number" ? new Html('min="1"') : ""} ${required}>${hint}</label>`;
 }
 
 function collection(name: string, items: SiteItem[]): Html {

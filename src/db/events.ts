@@ -24,6 +24,8 @@ export interface EventRecord {
   migration_error: string | null;
   design: unknown;
   has_couple_code: boolean;
+  pack_name: string;
+  guest_limit: number | null;
 }
 
 export interface NewEvent {
@@ -33,6 +35,8 @@ export interface NewEvent {
   venue: string;
   coupleEmail: string;
   photoLimit: number;
+  packName: string;
+  guestLimit: number | null;
 }
 
 export const DEFAULT_MISSIONS = [
@@ -48,7 +52,7 @@ export const DEFAULT_MISSIONS = [
 const SELECT_EVENT = central`
   id, slug, partner_one, partner_two, event_date::text AS event_date, venue,
   couple_email, status, db_name, schema_version, migration_error, design,
-  couple_code_hash IS NOT NULL AS has_couple_code
+  couple_code_hash IS NOT NULL AS has_couple_code, pack_name, guest_limit
 `;
 const DB_NAME = /^evt_[0-9a-f]{16}$/;
 const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -142,9 +146,9 @@ export async function createEvent(input: NewEvent): Promise<EventRecord> {
     for (let attempt = 0; attempt < 5; attempt++) {
       const slug = buildSlug(input.partnerOne, input.partnerTwo);
       const rows: EventRecord[] = await central`
-        INSERT INTO events (slug, partner_one, partner_two, event_date, venue, couple_email, db_name, schema_version)
+        INSERT INTO events (slug, partner_one, partner_two, event_date, venue, couple_email, db_name, schema_version, pack_name, guest_limit)
         VALUES (${slug}, ${input.partnerOne}, ${input.partnerTwo}, ${input.eventDate}::date,
-                ${input.venue}, ${input.coupleEmail}, ${dbName}, ${schemaVersion})
+                ${input.venue}, ${input.coupleEmail}, ${dbName}, ${schemaVersion}, ${input.packName}, ${input.guestLimit})
         ON CONFLICT (slug) DO NOTHING
         RETURNING ${SELECT_EVENT}
       `;
@@ -187,6 +191,12 @@ export async function applyEventStatus(event: EventRecord, status: EventStatus):
   await setEventStatus(event.id, status);
   if (status === "votacao") await eventDb(event.db_name)`UPDATE missions SET phase = 'votacao' WHERE phase = 'envio'`;
   if (status === "resultados") await eventDb(event.db_name)`UPDATE missions SET phase = 'encerrada'`;
+}
+
+export async function setEventPack(id: string, packName: string, guestLimit: number | null): Promise<void> {
+  await central`
+    UPDATE events SET pack_name = ${packName}, guest_limit = ${guestLimit}, updated_at = now() WHERE id = ${id}::uuid
+  `;
 }
 
 export function eventDesign(event: EventRecord): Design {

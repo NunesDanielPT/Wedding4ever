@@ -801,3 +801,41 @@ describe("área de cliente", () => {
     expect(check.stdout.toString().trim()).toBe("None 2 conteúdo de teste");
   });
 });
+
+describe("packs dos clientes", () => {
+  test("aplica o limite do pack, deixa voltar quem já entrou e permite mudar de pack", async () => {
+    const { getSite, saveSite } = await import("../src/lib/site");
+    const site = await getSite();
+    const pack = site.packs[0]!;
+    await saveSite({ ...site, packs: site.packs.map((item) => (item.id === pack.id ? { ...item, maxGuests: "2" } : item)) });
+    expect(await (await get("/admin/clientes/novo")).text()).toContain("Pack contratado");
+
+    const created = await post("/admin/clientes", { ...couple, packId: pack.id });
+    const id = created.headers.get("location")!.split("/").pop()!;
+    const event = (await events.getEventById(id))!;
+    expect(event.guest_limit).toBe(2);
+    expect(event.pack_name).toContain(pack.name);
+    expect((await post("/admin/clientes", { ...couple, packId: "inexistente" })).status).toBe(422);
+
+    const join = (email: string) => post(`/e/${event.slug}/entrar`, { name: "Convidado Teste", email }, { Cookie: "" });
+    expect((await join("um@exemplo.pt")).status).toBe(303);
+    expect((await join("dois@exemplo.pt")).status).toBe(303);
+    const blocked = await join("tres@exemplo.pt");
+    expect(blocked.status).toBe(409);
+    expect(await blocked.text()).toContain("número máximo de convidados");
+    expect((await join("UM@exemplo.pt")).status).toBe(303);
+    expect((await events.getEventStats(event.db_name)).guests).toBe(2);
+    expect(await (await get(`/admin/clientes/${id}`)).text()).toContain("O limite foi atingido");
+
+    const results = await Promise.all(["a1", "a2", "a3"].map((name) => join(`${name}@exemplo.pt`)));
+    expect(results.every((result) => result.status === 409)).toBe(true);
+
+    expect((await post(`/admin/clientes/${id}/pack`, { packId: "atual", guestLimit: "3" })).status).toBe(303);
+    const updated = (await events.getEventById(id))!;
+    expect(updated.guest_limit).toBe(3);
+    expect((await post(`/e/${event.slug}/entrar`, { name: "Convidado Teste", email: "tres@exemplo.pt" }, { Cookie: "" })).status).toBe(303);
+    expect((await post(`/admin/clientes/${id}/pack`, { packId: "", guestLimit: "" })).status).toBe(303);
+    expect((await events.getEventById(id))!.guest_limit).toBeNull();
+    await saveSite(site);
+  });
+});

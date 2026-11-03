@@ -11,6 +11,7 @@ import {
   listEvents,
   listGuests,
   applyEventStatus,
+  setEventPack,
   setPhotoLimit,
   type EventRecord,
   type EventStatus,
@@ -30,7 +31,7 @@ import {
   type MissionPhase,
 } from "./lib/missions";
 import { getSettings, parsePhotoLimit, saveDefaultPhotoLimit, saveEmailSettings, type SmtpSecurity } from "./lib/settings";
-import { countUnreadMessages } from "./lib/site";
+import { countUnreadMessages, getSite, type SiteItem } from "./lib/site";
 import { handleSiteAdmin } from "./routes/admin-site";
 import { handleClient } from "./routes/client";
 import { handleDesign } from "./routes/design";
@@ -69,6 +70,15 @@ function validateEvent(values: Required<admin.EventForm>): string | undefined {
   return undefined;
 }
 
+function packGuestLimit(pack: SiteItem | undefined): number | null {
+  return pack?.maxGuests ? Number(pack.maxGuests) : null;
+}
+
+function parseGuestLimit(value: string): number | null | undefined {
+  if (!value) return null;
+  return /^[1-9]\d{0,5}$/.test(value) ? Number(value) : undefined;
+}
+
 async function eventDetail(id: string, error?: string, status = 200, coupleCode?: string): Promise<Response> {
   const event = await getEventById(id);
   if (!event) return notFound();
@@ -76,7 +86,7 @@ async function eventDetail(id: string, error?: string, status = 200, coupleCode?
     console.error(`Base ${event.db_name} indisponível`, cause);
     return [null, []];
   });
-  return htmlResponse(admin.eventPage(event, stats, guests, error, coupleCode), status);
+  return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode), status);
 }
 
 
@@ -229,7 +239,7 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
   if (path === "/admin" && req.method === "GET") {
     return htmlResponse(admin.dashboardPage(await listEvents(), await countUnreadMessages()));
   }
-  if (path === "/admin/clientes/novo" && req.method === "GET") return htmlResponse(admin.newEventPage());
+  if (path === "/admin/clientes/novo" && req.method === "GET") return htmlResponse(admin.newEventPage((await getSite()).packs));
 
   if (path === "/admin/clientes" && req.method === "POST") {
     const form = await req.formData();
@@ -240,15 +250,23 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
       venue: field(form, "venue"),
       coupleEmail: field(form, "coupleEmail").toLowerCase(),
     };
-    const error = validateEvent(values);
-    if (error) return htmlResponse(admin.newEventPage(values, error), 422);
+    const { packs } = await getSite();
+    const packId = field(form, "packId");
+    const pack = packs.find((item) => item.id === packId);
+    const error = validateEvent(values) ?? (packId && !pack ? "Escolhe um pack válido." : undefined);
+    if (error) return htmlResponse(admin.newEventPage(packs, { ...values, packId }, error), 422);
     try {
       const { defaultPhotoLimit } = await getSettings();
-      const event = await createEvent({ ...values, photoLimit: defaultPhotoLimit });
+      const event = await createEvent({
+        ...values,
+        photoLimit: defaultPhotoLimit,
+        packName: pack ? `${pack.name} (${pack.guests})` : "",
+        guestLimit: packGuestLimit(pack),
+      });
       return redirect(`/admin/clientes/${event.id}`);
     } catch (cause) {
       console.error("Falha ao criar cliente", cause);
-      return htmlResponse(admin.newEventPage(values, "Não foi possível criar o cliente. Confirma a ligação ao PostgreSQL e tenta novamente."), 500);
+      return htmlResponse(admin.newEventPage(packs, { ...values, packId }, "Não foi possível criar o cliente. Confirma a ligação ao PostgreSQL e tenta novamente."), 500);
     }
   }
 
@@ -284,6 +302,21 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
   if (action === "missoes" || action?.startsWith("missoes/")) {
     const event = await getEventById(id);
     return event ? handleMissions(req, event, action) : notFound();
+  }
+
+  if (action === "pack" && req.method === "POST") {
+    const event = await getEventById(id);
+    if (!event) return notFound();
+    const form = await req.formData();
+    const packId = field(form, "packId");
+    const pack = (await getSite()).packs.find((item) => item.id === packId);
+    if (packId && packId !== "atual" && !pack) return eventDetail(id, "Escolhe um pack válido.", 422);
+    const custom = parseGuestLimit(field(form, "guestLimit"));
+    if (custom === undefined) return eventDetail(id, "O limite de convidados tem de ser um número inteiro.", 422);
+    const changed = packId !== "atual";
+    const name = changed ? (pack ? `${pack.name} (${pack.guests})` : "") : event.pack_name;
+    await setEventPack(id, name, changed ? packGuestLimit(pack) : custom);
+    return redirect(`/admin/clientes/${id}`);
   }
 
   if (action === "codigo-noivos" && req.method === "POST") {

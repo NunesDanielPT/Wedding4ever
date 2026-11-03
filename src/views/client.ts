@@ -92,11 +92,12 @@ export function clientEventPage(
   return clientShell(couple, html`
     <a class="back" href="/cliente">Voltar aos eventos</a>
     <h1>${couple}</h1>
-    <p class="lead">${formatDate(event.event_date)}</p>
+    <p class="lead">${formatDate(event.event_date)}${event.pack_name && `. Pack ${event.pack_name}`}</p>
     ${error && html`<p class="error" role="alert">${error}</p>`}
+    ${event.guest_limit !== null && stats.guests >= event.guest_limit && html`<p class="error" role="status">O limite de convidados do pack foi atingido. Novos convidados não conseguem entrar.</p>`}
 
     <dl class="facts client-facts">
-      <div><dt>Pessoas registadas</dt><dd>${stats.guests}</dd></div>
+      <div><dt>Pessoas registadas</dt><dd>${stats.guests}${event.guest_limit ? ` de ${event.guest_limit}` : ""}</dd></div>
       <div><dt>Fotografias</dt><dd>${stats.photos}</dd></div>
       <div><dt>Missões</dt><dd>${stats.missions}</dd></div>
     </dl>

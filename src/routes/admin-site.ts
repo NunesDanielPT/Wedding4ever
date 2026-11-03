@@ -47,6 +47,7 @@ async function readFields(form: FormData, fields: SiteField[], current: Record<s
     const value = field(form, item.name);
     if (value.length > 5000) throw new Error(`O campo ${item.label} é demasiado longo.`);
     if (item.required && !value) throw new Error(`Falta preencher: ${item.label}.`);
+    if (item.type === "number" && value && !/^[1-9]\d{0,5}$/.test(value)) throw new Error(`${item.label} tem de ser um número inteiro.`);
     if (item.type === "url" && value && !/^https?:\/\/[^\s]+$/i.test(value)) throw new Error("O link tem de começar por https://.");
     values[item.name] = value;
   }

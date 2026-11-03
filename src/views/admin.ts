@@ -3,6 +3,7 @@ import type { Design } from "../lib/design";
 import { eventUrl } from "../lib/event-assets";
 import { coupleNames, formatDate, initial } from "../lib/format";
 import { html, Html } from "../lib/html";
+import type { SiteItem } from "../lib/site";
 import { MAX_TITLE_LENGTH, MISSION_PHASES, MISSION_SUGGESTIONS, PHASE_LABELS, type AdminMission } from "../lib/missions";
 import { MAX_PHOTO_LIMIT, MIN_PHOTO_LIMIT, type PlatformSettings } from "../lib/settings";
 import { guestTable } from "./guests";
@@ -75,9 +76,15 @@ export interface EventForm {
   eventDate?: string;
   venue?: string;
   coupleEmail?: string;
+  packId?: string;
 }
 
-export function newEventPage(values: EventForm = {}, error?: string): string {
+function packLabel(pack: SiteItem): string {
+  const price = pack.price ? `, ${pack.price}` : "";
+  return `${pack.name} (${pack.guests})${price}`;
+}
+
+export function newEventPage(packs: SiteItem[], values: EventForm = {}, error?: string): string {
   return shell("Criar cliente", html`
     <a class="back" href="/admin">Voltar aos clientes</a>
     <h1>Criar cliente</h1>
@@ -91,6 +98,12 @@ export function newEventPage(values: EventForm = {}, error?: string): string {
       <label>Data do casamento<input type="date" name="eventDate" required value="${values.eventDate ?? ""}"></label>
       <label>Local<input name="venue" maxlength="120" value="${values.venue ?? ""}"></label>
       <label>E-mail dos noivos<input type="email" name="coupleEmail" maxlength="160" required value="${values.coupleEmail ?? ""}"></label>
+      <label>Pack contratado
+        <select name="packId">
+          <option value="">Sem pack, sem limite de convidados</option>
+          ${packs.map((pack) => html`<option value="${pack.id}" ${values.packId === pack.id ? new Html("selected") : ""}>${packLabel(pack)}</option>`)}
+        </select>
+      </label>
       <button class="primary">Criar cliente</button>
     </form>
   `);
@@ -100,6 +113,7 @@ export function eventPage(
   event: EventRecord,
   stats: EventStats | null,
   guests: RegisteredGuest[],
+  packs: SiteItem[],
   error?: string,
   coupleCode?: string,
 ): string {
@@ -128,6 +142,25 @@ export function eventPage(
           <h2>Link dos convidados</h2>
           <input class="copy-field" readonly value="${url}" aria-label="Link dos convidados">
           <a href="${url}" target="_blank" rel="noopener">Abrir como convidado</a>
+        </section>
+
+        <section>
+          <h2>Pack</h2>
+          <p>${event.pack_name || "Sem pack"}. ${stats?.guests ?? 0} ${event.guest_limit ? `de ${event.guest_limit} convidados registados.` : "convidados registados, sem limite."}</p>
+          ${event.guest_limit !== null && stats && stats.guests >= event.guest_limit && html`<p class="error" role="status">O limite foi atingido. Novos convidados não conseguem entrar.</p>`}
+          <form method="post" action="/admin/clientes/${event.id}/pack" class="stack">
+            <label>Mudar de pack
+              <select name="packId">
+                <option value="atual">Manter o pack atual</option>
+                <option value="">Sem pack, sem limite</option>
+                ${packs.map((pack) => html`<option value="${pack.id}">${packLabel(pack)}</option>`)}
+              </select>
+            </label>
+            <label>Limite de convidados, com o pack atual
+              <input type="number" name="guestLimit" min="1" value="${event.guest_limit ?? ""}" placeholder="Sem limite">
+            </label>
+            <button class="pack-save">Guardar pack</button>
+          </form>
         </section>
 
         <section>
