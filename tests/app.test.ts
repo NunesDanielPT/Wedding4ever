@@ -839,3 +839,46 @@ describe("packs dos clientes", () => {
     await saveSite(site);
   });
 });
+
+describe("administradores", () => {
+  const LOGIN = { email: "admin@w4e.test", password: "palavra-passe-de-teste" };
+
+  test("entra mesmo com um cookie antigo de outra versão", async () => {
+    const stale = "w4e_admin=sessao-antiga-invalida";
+    const fresh = cookieOf(await post("/admin/entrar", LOGIN, { Cookie: "" }));
+    const response = await handle(new Request(`${ORIGIN}/admin`, { headers: { Cookie: `${stale}; ${fresh}` } }));
+    expect(response.status).toBe(200);
+  });
+
+  test("adiciona, entra, muda a palavra-passe e remove administradores", async () => {
+    expect((await post("/admin/definicoes/administradores", { email: "nova@w4e.test", password: "curta" })).status).toBe(422);
+    expect((await post("/admin/definicoes/administradores", { email: "nova@w4e.test", password: "palavra-passe-nova" })).status).toBe(200);
+    expect((await post("/admin/definicoes/administradores", { email: "NOVA@w4e.test", password: "palavra-passe-nova" })).status).toBe(422);
+
+    const session = await post("/admin/entrar", { email: "nova@w4e.test", password: "palavra-passe-nova" }, { Cookie: "" });
+    expect(session.status).toBe(303);
+    const newAdmin = cookieOf(session);
+    const page = await (await get("/admin/definicoes")).text();
+    const id = page.match(/administradores\/([0-9a-f-]{36})\/palavra-passe"[^]*?administradores\/([0-9a-f-]{36})\/palavra-passe/)![2]!;
+
+    expect((await post(`/admin/definicoes/administradores/${id}/palavra-passe`, { password: "outra-palavra-passe" })).status).toBe(200);
+    const asNew = await handle(new Request(`${ORIGIN}/admin`, { headers: { Cookie: newAdmin } }));
+    expect(asNew.status).toBe(303);
+    expect((await post("/admin/entrar", { email: "nova@w4e.test", password: "palavra-passe-nova" }, { Cookie: "" })).status).toBe(401);
+    expect((await post("/admin/entrar", { email: "nova@w4e.test", password: "outra-palavra-passe" }, { Cookie: "" })).status).toBe(303);
+
+    const ownId = page.match(/administradores\/([0-9a-f-]{36})\/palavra-passe/)![1]!;
+    expect((await post(`/admin/definicoes/administradores/${ownId}/apagar`, {})).status).toBe(422);
+    expect((await post(`/admin/definicoes/administradores/${id}/apagar`, {})).status).toBe(200);
+    expect((await post("/admin/entrar", { email: "nova@w4e.test", password: "outra-palavra-passe" }, { Cookie: "" })).status).toBe(401);
+  });
+
+  test("repõe o acesso com ADMIN_RESET", async () => {
+    await central`UPDATE admins SET password_hash = ${await Bun.password.hash("esquecida-para-sempre")}`;
+    expect((await post("/admin/entrar", LOGIN, { Cookie: "" })).status).toBe(401);
+    process.env.ADMIN_RESET = "true";
+    await ensureFirstAdmin();
+    delete process.env.ADMIN_RESET;
+    expect((await post("/admin/entrar", LOGIN, { Cookie: "" })).status).toBe(303);
+  });
+});

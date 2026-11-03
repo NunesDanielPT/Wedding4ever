@@ -5,6 +5,7 @@ import { central } from "../db/central";
 const COOKIE = "w4e_admin";
 const SESSION_DAYS = 7;
 const MAX_FAILURES = 10;
+
 const FAILURE_WINDOW_MS = 15 * 60 * 1000;
 
 const failures = new Map<string, { count: number; resetAt: number }>();
@@ -38,10 +39,24 @@ export function recordFailure(email: string): void {
   else failures.set(email, { count: 1, resetAt: Date.now() + FAILURE_WINDOW_MS });
 }
 
+/** Com ADMIN_RESET=true, repõe o acesso de ADMIN_EMAIL com ADMIN_PASSWORD no arranque. */
+async function resetAdminFromEnvironment(): Promise<void> {
+  if (!config.adminEmail || config.adminPassword.length < MIN_ADMIN_PASSWORD) {
+    throw new Error("ADMIN_RESET precisa de ADMIN_EMAIL e de ADMIN_PASSWORD com pelo menos 12 caracteres");
+  }
+  const hash = await Bun.password.hash(config.adminPassword);
+  await central`
+    INSERT INTO admins (email, password_hash) VALUES (${config.adminEmail}, ${hash})
+    ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
+  `;
+  console.log(`Acesso de administrador reposto para ${config.adminEmail}. Remove ADMIN_RESET da stack.`);
+}
+
 export async function ensureFirstAdmin(): Promise<void> {
+  if (process.env.ADMIN_RESET === "true") return resetAdminFromEnvironment();
   const [row]: { count: number }[] = await central`SELECT count(*)::int AS count FROM admins`;
   if (row!.count > 0) return;
-  if (!config.adminEmail || config.adminPassword.length < 12) {
+  if (!config.adminEmail || config.adminPassword.length < MIN_ADMIN_PASSWORD) {
     throw new Error("Define ADMIN_EMAIL e ADMIN_PASSWORD (mínimo de 12 caracteres) no primeiro arranque");
   }
   const passwordHash = await Bun.password.hash(config.adminPassword);
@@ -82,22 +97,68 @@ export function readCookie(req: Request, cookie: string): string | undefined {
   return undefined;
 }
 
-function sessionToken(req: Request): string | undefined {
-  return readCookie(req, COOKIE);
+/** Pode haver mais do que um cookie com este nome, de uma versão anterior com outro caminho. */
+function sessionTokens(req: Request): string[] {
+  return (req.headers.get("cookie") ?? "")
+    .split(";")
+    .map((part) => part.trim().split("="))
+    .filter(([name, value]) => name === COOKIE && value)
+    .map(([, value]) => value!);
+}
+
+export async function currentAdminId(req: Request): Promise<string | undefined> {
+  for (const token of sessionTokens(req)) {
+    const rows: { admin_id: string }[] = await central`
+      SELECT admin_id FROM admin_sessions WHERE token_hash = ${hashToken(token)} AND expires_at > now()
+    `;
+    if (rows[0]) return rows[0].admin_id;
+  }
+  return undefined;
 }
 
 export async function isAuthenticated(req: Request): Promise<boolean> {
-  const token = sessionToken(req);
-  if (!token) return false;
+  return (await currentAdminId(req)) !== undefined;
+}
+
+export async function logout(req: Request): Promise<void> {
+  for (const token of sessionTokens(req)) {
+    await central`DELETE FROM admin_sessions WHERE token_hash = ${hashToken(token)}`;
+  }
+}
+
+export interface Admin {
+  id: string;
+  email: string;
+}
+
+export const MIN_ADMIN_PASSWORD = 12;
+
+export async function listAdmins(): Promise<Admin[]> {
+  return central`SELECT id, email FROM admins ORDER BY created_at, email`;
+}
+
+export async function addAdmin(email: string, password: string): Promise<boolean> {
+  const hash = await Bun.password.hash(password);
   const rows = await central`
-    SELECT 1 FROM admin_sessions WHERE token_hash = ${hashToken(token)} AND expires_at > now()
+    INSERT INTO admins (email, password_hash) VALUES (${email}, ${hash})
+    ON CONFLICT (email) DO NOTHING RETURNING id
   `;
   return rows.length > 0;
 }
 
-export async function logout(req: Request): Promise<void> {
-  const token = sessionToken(req);
-  if (token) await central`DELETE FROM admin_sessions WHERE token_hash = ${hashToken(token)}`;
+/** Muda a palavra-passe e termina as sessões abertas, exceto a de quem a mudou. */
+export async function setAdminPassword(id: string, password: string, keepToken?: Request): Promise<void> {
+  const hash = await Bun.password.hash(password);
+  const keep = keepToken ? sessionTokens(keepToken).map(hashToken) : [];
+  await central`UPDATE admins SET password_hash = ${hash} WHERE id = ${id}::uuid`;
+  const sessions: { token_hash: string }[] = await central`SELECT token_hash FROM admin_sessions WHERE admin_id = ${id}::uuid`;
+  for (const { token_hash } of sessions) {
+    if (!keep.includes(token_hash)) await central`DELETE FROM admin_sessions WHERE token_hash = ${token_hash}`;
+  }
+}
+
+export async function removeAdmin(id: string): Promise<void> {
+  await central`DELETE FROM admins WHERE id = ${id}::uuid`;
 }
 
 export function sessionCookie(token: string | null): string {

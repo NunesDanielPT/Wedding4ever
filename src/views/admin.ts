@@ -1,4 +1,5 @@
 import { EVENT_STATUSES, type EventRecord, type EventStats, type EventStatus, type RegisteredGuest } from "../db/events";
+import type { Admin } from "../lib/auth";
 import type { Design } from "../lib/design";
 import { eventUrl } from "../lib/event-assets";
 import { coupleNames, formatDate, initial } from "../lib/format";
@@ -299,7 +300,27 @@ export interface SettingsNotice {
   error?: string;
 }
 
-export function settingsPage(settings: PlatformSettings, adminEmail: string, notice: SettingsNotice = {}): string {
+function adminRow(admin: Admin, currentId?: string): Html {
+  const base = `/admin/definicoes/administradores/${admin.id}`;
+  const self = admin.id === currentId;
+  return html`
+    <li>
+      <p class="admin-email"><strong>${admin.email}</strong>${self && " (a tua conta)"}</p>
+      <form method="post" action="${base}/palavra-passe" class="inline-form">
+        <input type="password" name="password" autocomplete="new-password" minlength="12" required aria-label="Nova palavra-passe de ${admin.email}" placeholder="Nova palavra-passe">
+        <button>Mudar</button>
+      </form>
+      ${!self && html`<form method="post" action="${base}/apagar"><button class="link-button link-danger">Remover administrador</button></form>`}
+    </li>`;
+}
+
+export function settingsPage(
+  settings: PlatformSettings,
+  adminEmail: string,
+  admins: Admin[],
+  currentId: string | undefined,
+  notice: SettingsNotice = {},
+): string {
   const { email } = settings;
   const selected = (value: string) => (email.security === value ? new Html("selected") : "");
   return shell("Definições", html`
@@ -309,6 +330,20 @@ export function settingsPage(settings: PlatformSettings, adminEmail: string, not
     ${notice.success && html`<p class="notice" role="status">${notice.success}</p>`}
 
     <div class="settings">
+      <section>
+        <h2>Administradores</h2>
+        <p>Estas contas entram em <strong>/admin</strong> e têm acesso a todos os clientes.</p>
+        <ul class="admin-accounts">${admins.map((admin) => adminRow(admin, currentId))}</ul>
+        <form method="post" action="/admin/definicoes/administradores" class="stack add-admin">
+          <h3>Adicionar administrador</h3>
+          <div class="pair">
+            <label>E-mail<input type="email" name="email" autocomplete="off" required></label>
+            <label>Palavra-passe<input type="password" name="password" autocomplete="new-password" minlength="12" required></label>
+          </div>
+          <button class="primary">Adicionar administrador</button>
+        </form>
+      </section>
+
       <section>
         <h2>Fotografias por pessoa</h2>
         <p>Limite predefinido em cada missão para os novos clientes. Podes alterá-lo em cada cliente.</p>

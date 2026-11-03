@@ -16,7 +16,20 @@ import {
   type EventRecord,
   type EventStatus,
 } from "./db/events";
-import { isAuthenticated, isLoginLocked, isSameOrigin, login, logout, sessionCookie } from "./lib/auth";
+import {
+  addAdmin,
+  currentAdminId,
+  isAuthenticated,
+  isLoginLocked,
+  isSameOrigin,
+  listAdmins,
+  login,
+  logout,
+  MIN_ADMIN_PASSWORD,
+  removeAdmin,
+  sessionCookie,
+  setAdminPassword,
+} from "./lib/auth";
 import { cardsPdfResponse, qrPngResponse, qrSvgResponse } from "./lib/event-assets";
 import { generateClientCode } from "./lib/event-auth";
 import { sendMail } from "./lib/mail";
@@ -160,45 +173,74 @@ function validateEmailSettings(input: ReturnType<typeof emailInput>): string | u
   return undefined;
 }
 
-async function settingsPage(notice?: admin.SettingsNotice, status = 200): Promise<Response> {
-  return htmlResponse(admin.settingsPage(await getSettings(), config.adminEmail, notice), status);
+async function settingsPage(req: Request, notice?: admin.SettingsNotice, status = 200): Promise<Response> {
+  const [settings, admins, adminId] = await Promise.all([getSettings(), listAdmins(), currentAdminId(req)]);
+  return htmlResponse(admin.settingsPage(settings, config.adminEmail, admins, adminId, notice), status);
+}
+
+async function handleAdmins(req: Request, path: string, form: FormData): Promise<Response> {
+  const shortPassword = `A palavra-passe tem de ter pelo menos ${MIN_ADMIN_PASSWORD} caracteres.`;
+  const password = String(form.get("password") ?? "");
+  if (path === "/admin/definicoes/administradores") {
+    const email = field(form, "email").toLowerCase();
+    if (!isEmail(email)) return settingsPage(req, { error: "Indica um e-mail válido." }, 422);
+    if (password.length < MIN_ADMIN_PASSWORD) return settingsPage(req, { error: shortPassword }, 422);
+    if (!(await addAdmin(email, password))) return settingsPage(req, { error: "Esse e-mail já é administrador." }, 422);
+    return settingsPage(req, { success: `Administrador ${email} adicionado.` });
+  }
+  const match = path.match(/^\/admin\/definicoes\/administradores\/([0-9a-f-]{36})\/(palavra-passe|apagar)$/);
+  if (!match) return notFound();
+  const [, id, operation] = match as unknown as [string, string, string];
+  const admins = await listAdmins();
+  const target = admins.find((item) => item.id === id);
+  if (!target) return notFound();
+  const self = id === (await currentAdminId(req));
+  if (operation === "apagar") {
+    if (self) return settingsPage(req, { error: "Não podes remover a tua própria conta." }, 422);
+    await removeAdmin(id);
+    return settingsPage(req, { success: `Administrador ${target.email} removido.` });
+  }
+  if (password.length < MIN_ADMIN_PASSWORD) return settingsPage(req, { error: shortPassword }, 422);
+  await setAdminPassword(id, password, self ? req : undefined);
+  return settingsPage(req, { success: `Palavra-passe de ${target.email} alterada.` });
 }
 
 async function handleSettings(req: Request, path: string): Promise<Response> {
-  if (path === "/admin/definicoes" && req.method === "GET") return settingsPage();
+  if (path === "/admin/definicoes" && req.method === "GET") return settingsPage(req);
   if (req.method !== "POST") return notFound();
   const form = await req.formData();
+  if (path.startsWith("/admin/definicoes/administradores")) return handleAdmins(req, path, form);
 
   if (path === "/admin/definicoes/fotos") {
     const limit = parsePhotoLimit(field(form, "photoLimit"));
-    if (!limit) return settingsPage({ error: "Escolhe um limite de fotografias entre 1 e 50." }, 422);
+    if (!limit) return settingsPage(req, { error: "Escolhe um limite de fotografias entre 1 e 50." }, 422);
     await saveDefaultPhotoLimit(limit);
-    return settingsPage({ success: "Limite predefinido guardado. Aplica-se aos novos clientes." });
+    return settingsPage(req, { success: "Limite predefinido guardado. Aplica-se aos novos clientes." });
   }
 
   if (path === "/admin/definicoes/email") {
     const input = emailInput(form);
     const error = validateEmailSettings(input);
-    if (error) return settingsPage({ error }, 422);
+    if (error) return settingsPage(req, { error }, 422);
     await saveEmailSettings(input);
-    return settingsPage({ success: "Serviço de e-mail guardado." });
+    return settingsPage(req, { success: "Serviço de e-mail guardado." });
   }
 
   if (path === "/admin/definicoes/email/testar") {
     const to = field(form, "to").toLowerCase();
     const { email } = await getSettings();
-    if (!isEmail(to)) return settingsPage({ error: "Indica um e-mail válido para o teste." }, 422);
-    if (!email.host || !email.fromAddress) return settingsPage({ error: "Guarda primeiro os dados do serviço de e-mail." }, 422);
+    if (!isEmail(to)) return settingsPage(req, { error: "Indica um e-mail válido para o teste." }, 422);
+    if (!email.host || !email.fromAddress) return settingsPage(req, { error: "Guarda primeiro os dados do serviço de e-mail." }, 422);
     try {
       await sendMail(email, {
         to,
         subject: "Teste do Wedding4Ever",
         text: "Este e-mail confirma que o serviço de e-mail está a funcionar.",
       });
-      return settingsPage({ success: `E-mail de teste enviado para ${to}.` });
+      return settingsPage(req, { success: `E-mail de teste enviado para ${to}.` });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
-      return settingsPage({ error: `O teste falhou: ${message}` }, 502);
+      return settingsPage(req, { error: `O teste falhou: ${message}` }, 502);
     }
   }
   return notFound();

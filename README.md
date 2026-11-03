@@ -54,6 +54,10 @@ O servidor constrói a aplicação para o seu próprio processador. Para atualiz
 
 `APP_SECRET` tem pelo menos 32 caracteres e não pode mudar depois de criares clientes, porque protege também a palavra-passe do e-mail. `PUBLIC_URL` tem de ser igual ao endereço usado no browser.
 
+## Recuperar o acesso de administrador
+
+Os administradores são geridos em **Definições**. Se ficares sem acesso, adiciona `ADMIN_RESET=true` às variáveis da stack, com `ADMIN_EMAIL` e `ADMIN_PASSWORD` corretos, e atualiza a stack. Depois de entrares, remove `ADMIN_RESET` e atualiza novamente.
+
 ## Alterar a base de dados
 
 Adiciona um ficheiro numerado, nunca alteres um já aplicado:
