@@ -18,6 +18,11 @@ services:
       - "${APP_PORT:-3000}:3000"
     volumes:
       - photos:/data
+    networks:
+      default:
+      networkpi:
+        aliases:
+          - wedding4ever
 
   postgres:
     image: postgres:16-alpine
@@ -37,3 +42,7 @@ services:
 volumes:
   photos:
   postgres:
+
+networks:
+  networkpi:
+    external: true
