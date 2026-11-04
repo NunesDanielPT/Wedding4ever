@@ -95,7 +95,7 @@ async function closeEventDb(dbName: string): Promise<void> {
   const pool = pools.get(dbName);
   if (!pool) return;
   pools.delete(dbName);
-  await pool.close();
+  await pool.close({ timeout: 2 });
 }
 
 function slugPart(value: string): string {

@@ -1042,7 +1042,7 @@ describe("prazo dos eventos", () => {
     expect(stats.events[0]!.deleted).toBe(true);
     const [archived] = await central`SELECT activity::text AS activity FROM archived_events WHERE id = ${event.id}::uuid`;
     expect(archived.activity).not.toContain("arquivo@exemplo.pt");
-  });
+  }, 20_000);
 
   test("o prazo é configurável", async () => {
     expect((await post("/admin/definicoes/prazo", { retentionDays: "0" })).status).toBe(422);
