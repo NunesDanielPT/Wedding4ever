@@ -126,15 +126,23 @@ async function* archive(entries: ZipEntry[], zip64Threshold: number): AsyncGener
 }
 
 /** Cria o ZIP à medida que é descarregado, sem guardar o álbum em memória. */
-export function zipStream(entries: ZipEntry[], zip64Threshold = 0xffffffff): ReadableStream<Uint8Array> {
+export function zipStream(entries: ZipEntry[], zip64Threshold = 0xffffffff, onClose?: () => void): ReadableStream<Uint8Array> {
   const iterator = archive(entries, zip64Threshold);
   return new ReadableStream({
     async pull(controller) {
-      const { value, done } = await iterator.next();
-      if (done) controller.close();
-      else controller.enqueue(value);
+      try {
+        const { value, done } = await iterator.next();
+        if (done) {
+          controller.close();
+          onClose?.();
+        } else controller.enqueue(value);
+      } catch (error) {
+        onClose?.();
+        controller.error(error);
+      }
     },
     async cancel() {
+      onClose?.();
       await iterator.return(undefined);
     },
   });

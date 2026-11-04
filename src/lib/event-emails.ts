@@ -5,14 +5,14 @@ import { brand } from "./brand";
 import { eventUrl } from "./event-assets";
 import { generateClientCode } from "./event-auth";
 import { EVENT_TYPES } from "./event-types";
-import { AUDIENCES, getTemplates, renderTemplate, type Audience } from "./email-templates";
+import { AUDIENCES, getTemplates, renderTemplate, type Audience, type TemplateKey } from "./email-templates";
 import { formatDate } from "./format";
 import { sendMail } from "./mail";
 import { retentionOf } from "./retention";
 import { getSettings } from "./settings";
 
 export interface EmailLogRow {
-  audience: Audience;
+  audience: TemplateKey;
   recipient: string;
   subject: string;
   status: "enviado" | "falhou" | "nao_enviado";

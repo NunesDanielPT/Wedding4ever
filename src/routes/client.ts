@@ -17,8 +17,8 @@ import { findActiveOrganizer } from "../lib/organizers";
 import { getSettings } from "../lib/settings";
 import { getSite } from "../lib/site";
 import { getWinners, listAdminMissions, listAlbum, MISSION_PHASES, setMissionPhase, type MissionPhase } from "../lib/missions";
-import { originalPath, previewPath, schedulePreview, thumbPath } from "../lib/photos";
-import { zipStream } from "../lib/zip";
+import { previewPath, schedulePreview, thumbPath } from "../lib/photos";
+import { albumZip } from "../lib/album";
 import { clientContext, clientEventPage, clientEventsPage, clientExpiredPage, clientGalleryPage, clientLoginPage, clientShell } from "../views/client";
 import { designPage, newEventPage } from "../views/admin";
 import { queueEventEmails } from "../lib/event-emails";
@@ -31,24 +31,6 @@ import { handleMissions } from "./missions";
 import { field, htmlResponse, notFound, redirect } from "./http";
 
 const CLIENT_STATUSES = EVENT_STATUSES.filter((status) => status !== "arquivado");
-
-function safeName(value: string): string {
-  return value.replace(/[\u0000-\u001f\\/:*?"<>|]/g, " ").replace(/^\.+/, "").trim().slice(0, 60) || "sem nome";
-}
-
-async function albumZip(event: EventRecord): Promise<Response> {
-  const album = await listAlbum(event.db_name);
-  const entries = album.map((photo, index) => ({
-    name: `${String(photo.mission_position + 1).padStart(2, "0")} ${safeName(photo.mission_title)}/${String(index + 1).padStart(4, "0")} ${safeName(photo.guest_name)}.${photo.extension}`,
-    path: originalPath(event.id, photo.id, photo.extension),
-  }));
-  return new Response(zipStream(entries), {
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="album-${event.slug}.zip"`,
-    },
-  });
-}
 
 async function eventPage(event: EventRecord, canManage: boolean, status = 200, error?: string, code?: string): Promise<Response> {
   const [stats, guests, missions] = await Promise.all([

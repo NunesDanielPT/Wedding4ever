@@ -59,7 +59,7 @@ async function renderEmails(notice?: EmailsNotice, status = 200): Promise<Respon
 
 async function handleEmails(req: Request, path: string): Promise<Response> {
   if (path === "/admin/emails") return req.method === "GET" ? renderEmails() : notFound();
-  const match = path.match(/^\/admin\/emails\/(cliente|organizador|superadmin|vencedor)\/(guardar|repor|testar)$/);
+  const match = path.match(/^\/admin\/emails\/(cliente|organizador|superadmin|download|missoes|votacao|vencedor)\/(guardar|repor|testar)$/);
   if (!match || req.method !== "POST") return notFound();
   const audience = match[1] as TemplateKey;
   const form = await req.formData();

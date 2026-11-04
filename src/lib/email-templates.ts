@@ -1,7 +1,7 @@
 import { central } from "../db/central";
 
 export const AUDIENCES = ["cliente", "organizador", "superadmin"] as const;
-export const TEMPLATE_KEYS = [...AUDIENCES, "vencedor"] as const;
+export const TEMPLATE_KEYS = [...AUDIENCES, "download", "missoes", "votacao", "vencedor"] as const;
 export type Audience = (typeof AUDIENCES)[number];
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
@@ -14,6 +14,9 @@ export const AUDIENCE_LABELS: Record<TemplateKey, string> = {
   cliente: "Cliente",
   organizador: "Organizador",
   superadmin: "Superadmin",
+  download: "Download das fotografias, para convidados",
+  missoes: "Missões abertas, para convidados",
+  votacao: "Votação aberta, para convidados",
   vencedor: "Vencedor, para convidados",
 };
 
@@ -96,6 +99,37 @@ Organizador: {{organizador}}
 Pack: {{pack}}
 Limite de convidados: {{limite}}
 Último dia disponível: {{data_limite}}`,
+  },
+  download: {
+    subject: "As fotografias de {{evento}} estão disponíveis",
+    body: `Olá,
+
+Obrigado por teres participado em {{evento}}.
+
+Já podes descarregar todas as fotografias do evento aqui:
+{{link}}
+
+O link fica disponível até {{data_limite}}. Depois dessa data, as fotografias deixam de estar acessíveis e não ficam guardadas na plataforma, por isso guarda-as em segurança.
+
+A equipa {{plataforma}}`,
+  },
+  missoes: {
+    subject: "As missões de {{evento}} abriram",
+    body: `Olá,
+
+As missões de {{evento}} já estão abertas. Entra e envia as tuas fotografias:
+{{link}}
+
+A equipa {{plataforma}}`,
+  },
+  votacao: {
+    subject: "A votação de {{missao}} abriu",
+    body: `Olá,
+
+A votação da missão {{missao}}, no evento {{evento}}, já abriu. Escolhe a tua fotografia favorita:
+{{link}}
+
+A equipa {{plataforma}}`,
   },
   vencedor: {
     subject: "Temos vencedor em {{missao}}",

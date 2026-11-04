@@ -1258,12 +1258,37 @@ describe("notificações", () => {
     expect((await keys()).filter((key: string) => key.startsWith("votacao"))).toHaveLength(1);
   });
 
-  test("mostra no painel quantos telemóveis estão ativos e o resultado do teste", async () => {
-    const event = await createClient({ ...couple, name: "Evento diagnóstico" });
-    expect(await (await get(`/admin/clientes/${event.id}`)).text()).toContain("0 telemóveis com notificações ativas");
-    expect((await post(`/admin/clientes/${event.id}/notificacoes/testar`, {})).status).toBe(303);
-    expect(await (await get(`/admin/clientes/${event.id}`)).text()).toContain("0 de 0 aceites");
-    expect((await post(`/admin/clientes/${event.id}/notificacoes/testar`, {}, { Cookie: "" })).status).toBe(401);
+  test("os avisos por e-mail ficam desligados até serem ativados", async () => {
+    const { getSettings } = await import("../src/lib/settings");
+    expect((await getSettings()).emailNotices).toEqual({ missoes: false, votacao: false, vencedor: false });
+    expect(await (await get("/admin/definicoes")).text()).toContain("Avisos aos convidados por e-mail");
+    await post("/admin/definicoes/avisos", { votacao: "on" });
+    expect((await getSettings()).emailNotices.votacao).toBe(true);
+    expect((await getSettings()).emailNotices.vencedor).toBe(false);
+    await post("/admin/definicoes/avisos", {});
+    expect((await getSettings()).emailNotices.votacao).toBe(false);
+  });
+
+  test("o download só abre por ação manual e limita acessos", async () => {
+    const event = await createClient({ ...couple, name: "Evento download" });
+    const base = `/admin/clientes/${event.id}/download`;
+    expect(await (await get(`/admin/clientes/${event.id}`)).text()).not.toContain("notificacoes/testar");
+    expect((await post(`${base}/enviar`, {})).status).toBe(422);
+    expect((await post(`${base}/enviar`, { confirm: "on" })).status).toBe(422);
+    expect((await events.getEventById(event.id))!.album_token).toBeNull();
+
+    const token = "t".repeat(32);
+    await events.setAlbumToken(event.id, token);
+    expect((await get(`/e/${event.slug}/album/${"x".repeat(32)}`, false)).status).toBe(404);
+    expect((await get(`/e/${event.slug}/album/${token}`, false)).status).toBe(200);
+    const zips = await Promise.all([1, 2, 3, 4].map(() => get(`/e/${event.slug}/album/${token}/fotos.zip`, false)));
+    expect(zips.filter((zip) => zip.status === 200)).toHaveLength(3);
+    expect(zips.filter((zip) => zip.status === 429)).toHaveLength(1);
+    await Promise.all(zips.map((zip) => zip.arrayBuffer()));
+    expect((await get(`/e/${event.slug}/album/${token}/fotos.zip`, false)).status).toBe(200);
+
+    expect((await post(`${base}/fechar`, {})).status).toBe(303);
+    expect((await get(`/e/${event.slug}/album/${token}`, false)).status).toBe(404);
   });
 
   test("o e-mail de vencedor é editável", async () => {

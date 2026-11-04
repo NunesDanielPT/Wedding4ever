@@ -29,6 +29,7 @@ export interface EventRecord {
   pack_name: string;
   guest_limit: number | null;
   updated_at: string;
+  album_token: string | null;
 }
 
 export interface NewEvent {
@@ -46,7 +47,7 @@ export interface NewEvent {
 const SELECT_EVENT = central`
   id, slug, name, event_type, organizer_id, event_date::text AS event_date, venue,
   couple_email, status, db_name, schema_version, migration_error, design,
-  couple_code_hash IS NOT NULL AS has_couple_code, pack_name, guest_limit, updated_at
+  couple_code_hash IS NOT NULL AS has_couple_code, pack_name, guest_limit, updated_at, album_token
 `;
 const DB_NAME = /^evt_[0-9a-f]{16}$/;
 const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -196,6 +197,10 @@ export async function setEventPack(id: string, packName: string, guestLimit: num
   await central`
     UPDATE events SET pack_name = ${packName}, guest_limit = ${guestLimit}, updated_at = now() WHERE id = ${id}::uuid
   `;
+}
+
+export async function setAlbumToken(id: string, token: string | null): Promise<void> {
+  await central`UPDATE events SET album_token = ${token} WHERE id = ${id}::uuid`;
 }
 
 export function eventDesign(event: EventRecord): Design {

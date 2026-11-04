@@ -2,6 +2,7 @@ import { eventDesign, getEventBySlug, listMissions, type EventRecord } from "../
 import { themeCss } from "../lib/design";
 import { mediaPath } from "../lib/event-assets";
 import { currentGuest, guestCookie, GuestLimitError, joinGuest, type Guest } from "../lib/event-auth";
+import { guestAlbumZip } from "../lib/album";
 import { asset } from "../lib/assets";
 import { brand } from "../lib/brand";
 import { getWinners, listAdminMissions } from "../lib/missions";
@@ -26,7 +27,7 @@ import {
   votePhoto,
   type MissionDetail,
 } from "../lib/photos";
-import { eventExpiredPage, guestHomePage, joinPage, missionPage } from "../views/public";
+import { albumPage, eventExpiredPage, guestHomePage, joinPage, missionPage } from "../views/public";
 import { winnersPage } from "../views/winners";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./http";
 
@@ -189,6 +190,16 @@ export async function handleEvent(req: Request, path: string): Promise<Response 
 
   const photoResponse = await handlePhotos(req, event, action);
   if (photoResponse) return photoResponse;
+
+  const album = action.match(/^album\/([A-Za-z0-9_-]{20,64})(\/fotos\.zip)?$/);
+  if (album && req.method === "GET") {
+    if (!event.album_token || album[1] !== event.album_token) return notFound();
+    const base = `/e/${event.slug}/album/${album[1]}`;
+    if (!album[2]) return htmlResponse(albumPage(event, `${base}/fotos.zip`));
+    const zip = await guestAlbumZip(event);
+    if (zip) return zip;
+    return htmlResponse(albumPage(event, `${base}/fotos.zip`, "Há muitos downloads ao mesmo tempo. Tenta outra vez daqui a alguns minutos."), 429);
+  }
 
   if (action === "manifest.webmanifest" && req.method === "GET") {
     return new Response(

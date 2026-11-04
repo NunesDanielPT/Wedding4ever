@@ -27,6 +27,7 @@ Já disponível:
 - Prazo por evento, com contagem de dias, bloqueio do acesso e eliminação manual
 - Modelos de e-mail em `/admin/emails`
 - Avisos em direto, instalação como app e notificações no telemóvel
+- Envio manual do link de download aos convidados, com limite de downloads em simultâneo
 - Migrações automáticas em todas as bases
 
 Ainda por fazer: ranking, moderação e exportação em ZIP.

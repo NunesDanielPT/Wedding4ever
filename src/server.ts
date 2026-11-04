@@ -11,6 +11,7 @@ import {
   listEvents,
   listGuests,
   applyEventStatus,
+  setAlbumToken,
   setEventPack,
   type EventRecord,
   type EventStatus,
@@ -29,14 +30,15 @@ import {
   sessionCookie,
   setAdminPassword,
 } from "./lib/auth";
-import { cardsPdfResponse, qrPngResponse, qrSvgResponse } from "./lib/event-assets";
+import { randomBytes } from "node:crypto";
+import { cardsPdfResponse, eventUrl, qrPngResponse, qrSvgResponse } from "./lib/event-assets";
 import { readEventForm } from "./routes/event-form";
 import { handleAdminOps } from "./routes/admin-ops";
 import { handleMissions } from "./routes/missions";
 import { listOrganizers } from "./lib/organizers";
 import { generateClientCode } from "./lib/event-auth";
 import { sendMail } from "./lib/mail";
-import { getSettings, parsePhotoLimit, saveBrandName, saveDefaultPhotoLimit, saveEmailSettings, saveRetentionDays, type SmtpSecurity } from "./lib/settings";
+import { EMAIL_NOTICES, getSettings, parsePhotoLimit, saveBrandName, saveEmailNotices, saveDefaultPhotoLimit, saveEmailSettings, saveRetentionDays, type SmtpSecurity } from "./lib/settings";
 import { countUnreadMessages, getSite, type SiteItem } from "./lib/site";
 import { handleSiteAdmin } from "./routes/admin-site";
 import { handleClient } from "./routes/client";
@@ -46,11 +48,11 @@ import { handleSite } from "./routes/site";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./routes/http";
 import { brand } from "./lib/brand";
 import { listEmailLog, queueEventEmails, sendEventEmails } from "./lib/event-emails";
-import { getPushStatus, queueNotifications, sendTestNotification } from "./lib/notifications";
+import { queueNotifications, sendDownloadEmails } from "./lib/notifications";
 import { archiveEvent } from "./lib/stats";
 import * as admin from "./views/admin";
 
-const VERSION = "2026-11-04-diagnostico";
+const VERSION = "2026-11-04-download";
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
@@ -91,12 +93,9 @@ async function eventDetail(id: string, error?: string, status = 200, coupleCode?
     console.error(`Base ${event.db_name} indisponível`, cause);
     return [null, []];
   });
-  const [{ retentionDays }, emails, push] = await Promise.all([
-    getSettings(),
-    listEmailLog(id),
-    getPushStatus(event).catch(() => null),
-  ]);
-  return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode, retentionDays, emails, push), status);
+  const [settings, emails] = await Promise.all([getSettings(), listEmailLog(id)]);
+  const emailReady = settings.email.enabled && Boolean(settings.email.host);
+  return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode, settings.retentionDays, emails, emailReady), status);
 }
 
 
@@ -165,6 +164,12 @@ async function handleSettings(req: Request, path: string): Promise<Response> {
     if (name.length < 2 || name.length > 60) return settingsPage(req, { error: "O nome tem de ter entre 2 e 60 caracteres." }, 422);
     await saveBrandName(name);
     return settingsPage(req, { success: "Nome da plataforma guardado." });
+  }
+
+  if (path === "/admin/definicoes/avisos") {
+    const notices = Object.fromEntries(EMAIL_NOTICES.map((notice) => [notice, form.get(notice) !== null]));
+    await saveEmailNotices(notices as Parameters<typeof saveEmailNotices>[0]);
+    return settingsPage(req, { success: "Avisos por e-mail guardados." });
   }
 
   if (path === "/admin/definicoes/prazo") {
@@ -320,10 +325,22 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     return redirect(`/admin/clientes/${id}`);
   }
 
-  if (action === "notificacoes/testar" && req.method === "POST") {
+  if ((action === "download/enviar" || action === "download/fechar") && req.method === "POST") {
     const event = await getEventById(id);
     if (!event) return notFound();
-    await sendTestNotification(event);
+    if (action === "download/fechar") {
+      await setAlbumToken(id, null);
+      return redirect(`/admin/clientes/${id}`);
+    }
+    const form = await req.formData();
+    const { email } = await getSettings();
+    if (!form.get("confirm")) return eventDetail(id, "Confirma o envio antes de continuar.", 422);
+    if (!email.enabled || !email.host) return eventDetail(id, "Ativa primeiro o serviço de e-mail em Definições.", 422);
+    const token = event.album_token ?? randomBytes(24).toString("base64url");
+    await setAlbumToken(id, token);
+    void sendDownloadEmails(event, `${eventUrl(event)}/album/${token}`).catch((cause) => {
+      console.error(`Falha nos e-mails de download de ${id}`, cause);
+    });
     return redirect(`/admin/clientes/${id}`);
   }
 

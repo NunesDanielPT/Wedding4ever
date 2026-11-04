@@ -255,6 +255,17 @@ export function missionPage(
   `);
 }
 
+export function albumPage(event: EventRecord, zipUrl: string, error?: string): string {
+  return themed(event, event.name, html`
+    <main class="guest">
+      <h1>${event.name}</h1>
+      <p>Obrigado por teres participado. Descarrega aqui todas as fotografias do evento.</p>
+      ${error && html`<p class="error" role="alert">${error}</p>`}
+      <a class="primary" href="${zipUrl}">Descarregar fotografias</a>
+    </main>
+  `);
+}
+
 export function eventExpiredPage(event: EventRecord): string {
   return themed(event, event.name, html`
     <main class="guest">

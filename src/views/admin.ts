@@ -9,12 +9,11 @@ import { html, Html } from "../lib/html";
 import { AUDIENCE_LABELS } from "../lib/email-templates";
 import { retentionOf } from "../lib/retention";
 import type { EmailLogRow } from "../lib/event-emails";
-import type { PushStatus } from "../lib/notifications";
 import type { SiteItem } from "../lib/site";
 import { MAX_TITLE_LENGTH, MISSION_PHASES, PHASE_LABELS, type AdminMission } from "../lib/missions";
 import { EVENT_TYPE_IDS, EVENT_TYPES } from "../lib/event-types";
 import { BORDERS, COLOR_PRESETS, FONTS, QR_SIZES } from "../lib/design";
-import { MAX_PHOTO_LIMIT, MIN_PHOTO_LIMIT, type PlatformSettings } from "../lib/settings";
+import { MAX_PHOTO_LIMIT, MIN_PHOTO_LIMIT, type EmailNotice, type PlatformSettings } from "../lib/settings";
 import { guestTable } from "./guests";
 import { appShell } from "./app-shell";
 import { page, rings } from "./layout";
@@ -170,7 +169,7 @@ export function eventPage(
   coupleCode?: string,
   retentionDays = 30,
   emails: EmailLogRow[] = [],
-  push: PushStatus | null = null,
+  emailReady = false,
 ): string {
   const url = eventUrl(event);
   const retention = retentionOf(event.event_date, retentionDays);
@@ -284,15 +283,18 @@ export function eventPage(
       </div>
     </div>
 
-    ${push && html`<section class="guests-section">
-      <h2>Notificações no telemóvel</h2>
-      <p>${push.subscribers === 1 ? "1 telemóvel com notificações ativas." : `${push.subscribers} telemóveis com notificações ativas.`}</p>
-      ${push.last && html`<p class="${push.last.error ? "error" : "notice"}" role="status">
-        Último envio, ${push.last.title}: ${push.last.sent} de ${push.last.total} aceites pelo serviço de notificações${push.last.removed > 0 ? `, ${push.last.removed} já cancelados` : ""}.
-        ${push.last.error && html`<br>Erro: ${push.last.error}`}
-      </p>`}
-      <form method="post" action="/admin/clientes/${event.id}/notificacoes/testar"><button>Enviar notificação de teste</button></form>
-    </section>`}
+    <section class="guests-section">
+      <h2>Download para os convidados</h2>
+      ${event.album_token
+        ? html`<p class="notice" role="status">O link de download está aberto. Podes reenviar o e-mail ou fechar o link.</p>`
+        : html`<p>Quando quiseres, envia a todos os convidados um e-mail com o link para descarregarem as fotografias. Nada é enviado automaticamente.</p>`}
+      ${!emailReady && html`<p class="hint">Ativa primeiro o serviço de e-mail em Definições.</p>`}
+      <form method="post" action="/admin/clientes/${event.id}/download/enviar" class="stack">
+        <label class="check"><input type="checkbox" name="confirm" required> Confirmo o envio a ${guests.length} ${guests.length === 1 ? "convidado" : "convidados"}</label>
+        <button ${emailReady ? "" : new Html("disabled")}>Enviar e-mail de download a todos</button>
+      </form>
+      ${event.album_token && html`<form method="post" action="/admin/clientes/${event.id}/download/fechar" class="email-send"><button class="link-button link-danger">Fechar o link de download</button></form>`}
+    </section>
 
     <section class="guests-section">
       <h2>E-mails do evento</h2>
@@ -435,6 +437,12 @@ export interface SettingsNotice {
   error?: string;
 }
 
+const NOTICE_LABELS: Record<EmailNotice, string> = {
+  missoes: "Quando as missões abrem",
+  votacao: "Quando uma votação abre",
+  vencedor: "Quando há vencedor numa missão",
+};
+
 function adminRow(admin: Admin, currentId?: string): Html {
   const base = `/admin/definicoes/administradores/${admin.id}`;
   const self = admin.id === currentId;
@@ -484,6 +492,16 @@ export function settingsPage(
             <label>Palavra-passe<input type="password" name="password" autocomplete="new-password" minlength="12" required></label>
           </div>
           <button class="primary">Adicionar administrador</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Avisos aos convidados por e-mail</h2>
+        <p>Desligados por defeito. Convidados com notificações ativas não recebem estes e-mails.</p>
+        <form method="post" action="/admin/definicoes/avisos" class="stack">
+          ${(Object.entries(NOTICE_LABELS) as [EmailNotice, string][]).map(([key, label]) => html`
+            <label class="check"><input type="checkbox" name="${key}" ${settings.emailNotices[key] ? new Html("checked") : ""}> ${label}</label>`)}
+          <button>Guardar avisos</button>
         </form>
       </section>
 

@@ -15,7 +15,11 @@ export interface EmailSettings {
   fromAddress: string;
 }
 
+export const EMAIL_NOTICES = ["missoes", "votacao", "vencedor"] as const;
+export type EmailNotice = (typeof EMAIL_NOTICES)[number];
+
 export interface PlatformSettings {
+  emailNotices: Record<EmailNotice, boolean>;
   retentionDays: number;
   brandName: string;
   defaultPhotoLimit: number;
@@ -26,6 +30,7 @@ export const MIN_PHOTO_LIMIT = 1;
 export const MAX_PHOTO_LIMIT = 50;
 
 const DEFAULTS: PlatformSettings = {
+  emailNotices: { missoes: false, votacao: false, vencedor: false },
   retentionDays: 30,
   brandName: DEFAULT_BRAND,
   defaultPhotoLimit: 3,
@@ -68,6 +73,10 @@ export async function saveBrandName(name: string): Promise<void> {
 
 export async function loadBrand(): Promise<void> {
   setBrand((await getSettings()).brandName);
+}
+
+export async function saveEmailNotices(emailNotices: Record<EmailNotice, boolean>): Promise<void> {
+  await saveSettings({ ...(await getSettings()), emailNotices });
 }
 
 export async function saveRetentionDays(days: number): Promise<void> {

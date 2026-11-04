@@ -168,13 +168,16 @@ const AUDIENCE_HINTS: Record<TemplateKey, string> = {
   cliente: "Boas-vindas e tutorial. Vai para o e-mail do cliente quando o evento é criado.",
   organizador: "Vai para o organizador do evento, quando existir.",
   superadmin: "Vai para todos os administradores.",
-  vencedor: "Vai para os convidados sem notificações ativas, quando uma missão termina com vencedor.",
+  download: "Vai para todos os convidados, só quando carregas no botão de envio na página do evento.",
+  missoes: "Automático, só se o ativares em Definições.",
+  votacao: "Automático, só se o ativares em Definições.",
+  vencedor: "Automático, só se o ativares em Definições.",
 };
 
 export function emailsPage(templates: Record<TemplateKey, EmailTemplate>, sample: Record<string, string>, notice: EmailsNotice = {}): string {
   return shell("E-mails", html`
     <h1>E-mails</h1>
-    <p class="lead">Estes textos são enviados automaticamente, depois de ativares o serviço em Definições. As palavras entre chavetas são preenchidas automaticamente.</p>
+    <p class="lead">Estes são os textos dos e-mails da plataforma. Os avisos aos convidados só saem se os ativares em Definições. As palavras entre chavetas são preenchidas automaticamente.</p>
     ${notice.error && html`<p class="error" role="alert">${notice.error}</p>`}
     ${notice.success && html`<p class="notice" role="status">${notice.success}</p>`}
 

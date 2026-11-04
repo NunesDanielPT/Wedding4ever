@@ -1,11 +1,14 @@
+import { central } from "../db/central";
 import { getEventById, eventDb, type EventRecord } from "../db/events";
 import { brand } from "./brand";
 import { getTemplates, renderTemplate } from "./email-templates";
 import { eventUrl } from "./event-assets";
 import { sendMail } from "./mail";
-import { getWinners, listAdminMissions, type MissionWinners } from "./missions";
+import { getWinners, listAdminMissions } from "./missions";
 import { getVapidKeys, sendPush, type PushSubscription } from "./push";
-import { getSettings } from "./settings";
+import { formatDate } from "./format";
+import { retentionOf } from "./retention";
+import { getSettings, type EmailNotice } from "./settings";
 
 const CONCURRENCY = 10;
 
@@ -43,83 +46,80 @@ async function claim(event: EventRecord, key: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-export interface PushResult {
-  at: Date;
-  title: string;
-  total: number;
-  sent: number;
-  removed: number;
-  error?: string;
-}
-
-const lastResults = new Map<string, PushResult>();
-
-async function pushAll(event: EventRecord, notice: Notice): Promise<PushResult> {
+async function pushAll(event: EventRecord, notice: Notice): Promise<void> {
   const db = eventDb(event.db_name);
   const subscriptions: StoredSubscription[] = await db`SELECT endpoint, guest_id, p256dh, auth FROM push_subscriptions`;
-  const result: PushResult = { at: new Date(), title: notice.title, total: subscriptions.length, sent: 0, removed: 0 };
-  if (subscriptions.length > 0) {
-    const keys = await getVapidKeys();
-    const payload = JSON.stringify({ ...notice, tag: notice.url });
-    for (let i = 0; i < subscriptions.length; i += CONCURRENCY) {
-      await Promise.all(
-        subscriptions.slice(i, i + CONCURRENCY).map(async (subscription) => {
-          try {
-            if (await sendPush(subscription, payload, keys)) {
-              result.sent++;
-            } else {
-              result.removed++;
-              await removeSubscription(event, subscription.endpoint);
-            }
-          } catch (cause) {
-            result.error = cause instanceof Error ? cause.message : String(cause);
-            console.error("Falha numa notificação", result.error);
-          }
-        }),
-      );
-    }
+  if (subscriptions.length === 0) return;
+  const keys = await getVapidKeys();
+  const payload = JSON.stringify({ ...notice, tag: notice.url });
+  for (let i = 0; i < subscriptions.length; i += CONCURRENCY) {
+    await Promise.all(
+      subscriptions.slice(i, i + CONCURRENCY).map(async (subscription) => {
+        try {
+          const active = await sendPush(subscription, payload, keys);
+          if (!active) await removeSubscription(event, subscription.endpoint);
+        } catch (cause) {
+          console.error("Falha numa notificação", cause instanceof Error ? cause.message : cause);
+        }
+      }),
+    );
   }
-  lastResults.set(event.id, result);
-  return result;
 }
 
-export interface PushStatus {
-  subscribers: number;
-  last?: PushResult;
-}
-
-export async function getPushStatus(event: EventRecord): Promise<PushStatus> {
-  const [row]: { count: number }[] = await eventDb(event.db_name)`SELECT count(*)::int AS count FROM push_subscriptions`;
-  return { subscribers: row!.count, last: lastResults.get(event.id) };
-}
-
-export function sendTestNotification(event: EventRecord): Promise<PushResult> {
-  return pushAll(event, { title: "Notificação de teste", body: `As notificações de ${event.name} estão a funcionar.`, url: `/e/${event.slug}` });
-}
-
-/** O e-mail é a reserva: só vai para quem não tem notificações ativas. */
-async function emailWinner(event: EventRecord, winners: MissionWinners): Promise<void> {
-  const { email } = await getSettings();
-  if (!email.enabled || !email.host) return;
-  const guests: { email: string; full_name: string }[] = await eventDb(event.db_name)`
-    SELECT g.email, g.full_name FROM guests g
+/** Avisos por e-mail, desligados por defeito; quem tem notificações não recebe em duplicado. */
+async function emailNotice(event: EventRecord, notice: EmailNotice, url: string, extra: Record<string, string> = {}): Promise<void> {
+  const { email, emailNotices } = await getSettings();
+  if (!email.enabled || !email.host || !emailNotices[notice]) return;
+  const guests: { email: string }[] = await eventDb(event.db_name)`
+    SELECT g.email FROM guests g
     WHERE NOT EXISTS (SELECT 1 FROM push_subscriptions s WHERE s.guest_id = g.id)
   `;
-  const template = (await getTemplates()).vencedor;
-  const variables = {
-    evento: event.name,
-    missao: winners.title,
-    vencedor: winners.photos.map((photo) => photo.guest_name).join(", "),
-    link: `${eventUrl(event)}/missoes/${winners.id}`,
-    plataforma: brand(),
-  };
+  const template = (await getTemplates())[notice];
+  const variables = { evento: event.name, link: url, plataforma: brand(), ...extra };
   const subject = renderTemplate(template.subject, variables);
   const text = renderTemplate(template.body, variables);
   for (const guest of guests) {
     await sendMail(email, { to: guest.email, subject, text }).catch((cause) => {
-      console.error("Falha num e-mail de vencedor", cause instanceof Error ? cause.message : cause);
+      console.error("Falha num e-mail de aviso", cause instanceof Error ? cause.message : cause);
     });
   }
+}
+
+export interface DownloadResult {
+  total: number;
+  sent: number;
+}
+
+/** Envia o link de download a todos os convidados, apenas quando o superadmin carrega no botão. */
+export async function sendDownloadEmails(event: EventRecord, link: string): Promise<DownloadResult> {
+  const { email, retentionDays } = await getSettings();
+  const guests: { email: string }[] = await eventDb(event.db_name)`SELECT email FROM guests ORDER BY created_at`;
+  const template = (await getTemplates()).download;
+  const variables = {
+    evento: event.name,
+    link,
+    dias: String(retentionDays),
+    data_limite: formatDate(retentionOf(event.event_date, retentionDays).deleteDate),
+    plataforma: brand(),
+  };
+  const subject = renderTemplate(template.subject, variables);
+  const text = renderTemplate(template.body, variables);
+  let sent = 0;
+  let lastError: string | null = null;
+  for (const guest of guests) {
+    try {
+      await sendMail(email, { to: guest.email, subject, text });
+      sent++;
+    } catch (cause) {
+      lastError = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+  await central`
+    INSERT INTO email_log (event_id, audience, recipient, subject, status, error)
+    VALUES (${event.id}::uuid, 'download', ${`${sent} de ${guests.length} convidados`}, ${subject},
+            ${sent === guests.length ? "enviado" : "falhou"}, ${lastError})
+  `;
+  return { total: guests.length, sent };
 }
 
 /** Compara o estado atual com o que já foi avisado, por isso repetir nunca duplica avisos. */
@@ -138,17 +138,19 @@ export async function notifyEventChanges(eventId: string): Promise<void> {
 
   if (missions.some((mission) => mission.phase === "envio") && (await claim(event, "missoes-abertas"))) {
     await pushAll(event, { title: "As missões abriram", body: `Já podes enviar fotografias em ${event.name}.`, url: base });
+    await emailNotice(event, "missoes", eventUrl(event));
   }
   for (const mission of missions) {
     if (mission.phase === "votacao" && (await claim(event, `votacao:${mission.id}`))) {
       await pushAll(event, { title: "A votação abriu", body: mission.title, url: `${base}/missoes/${mission.id}` });
+      await emailNotice(event, "votacao", `${eventUrl(event)}/missoes/${mission.id}`, { missao: mission.title });
     }
   }
   for (const winner of winners) {
     if (await claim(event, `vencedor:${winner.id}`)) {
       const names = winner.photos.map((photo) => photo.guest_name).join(", ");
       await pushAll(event, { title: `Temos vencedor: ${winner.title}`, body: names, url: `${base}/missoes/${winner.id}` });
-      await emailWinner(event, winner);
+      await emailNotice(event, "vencedor", `${eventUrl(event)}/missoes/${winner.id}`, { missao: winner.title, vencedor: names });
     }
   }
 }
