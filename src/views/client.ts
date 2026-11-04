@@ -4,7 +4,7 @@ import type { EventRecord, EventStats, RegisteredGuest } from "../db/events";
 import { EVENT_STATUSES } from "../db/events";
 import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
-import { PHASE_LABELS, type AdminMission, type AlbumPhoto, type MissionPhase } from "../lib/missions";
+import { PHASE_LABELS, type AdminMission, type AlbumMission, type AlbumPage, type MissionPhase } from "../lib/missions";
 import { EVENT_TYPES } from "../lib/event-types";
 import { retentionOf } from "../lib/retention";
 import { type DesignContext, STATUS_LABELS } from "./admin";
@@ -28,18 +28,54 @@ export function clientContext(event: EventRecord): DesignContext {
   return { base, back: base, wrap: clientShell };
 }
 
-export function clientLoginPage(error?: string): string {
+function authCard(content: Html): string {
+  return page(`Entrar | ${brand()}`, html`
+    <main class="login">
+      <a class="brand brand-large" href="/">${rings}<span>${brand()}</span></a>
+      ${content}
+    </main>
+  `);
+}
+
+export function recoverPage(notice?: string, error?: string): string {
+  return authCard(html`
+    <h1 class="login-title">Recuperar acesso</h1>
+    <p class="hint">Indica o teu e-mail e enviamos-te um link para definires uma nova palavra-passe.</p>
+    ${notice && html`<p class="notice" role="status">${notice}</p>`}
+    ${error && html`<p class="error" role="alert">${error}</p>`}
+    <form method="post" action="/recuperar" class="stack">
+      <label>E-mail<input type="email" name="email" autocomplete="username" required></label>
+      <button class="primary">Enviar link</button>
+    </form>
+    <p class="login-link"><a href="/entrar">Voltar a entrar</a></p>
+  `);
+}
+
+export function resetPage(token: string, error?: string): string {
+  return authCard(html`
+    <h1 class="login-title">Nova palavra-passe</h1>
+    ${error && html`<p class="error" role="alert">${error}</p>`}
+    <form method="post" action="/recuperar/${token}" class="stack">
+      <label>Nova palavra-passe<input type="password" name="password" autocomplete="new-password" minlength="12" required></label>
+      <button class="primary">Guardar palavra-passe</button>
+    </form>
+  `);
+}
+
+export function clientLoginPage(error?: string, changed = false): string {
   return page(`Entrar | ${brand()}`, html`
     <main class="login">
       <a class="brand brand-large" href="/">${rings}<span>${brand()}</span></a>
       <h1 class="login-title">Área de cliente</h1>
       <p class="hint">Para clientes e organizadores de eventos.</p>
       <form method="post" action="/entrar" class="stack">
+        ${changed && html`<p class="notice" role="status">Palavra-passe alterada. Já podes entrar.</p>`}
         ${error && html`<p class="error" role="alert">${error}</p>`}
         <label>E-mail<input type="email" name="email" autocomplete="username" required autofocus></label>
         <label>Código de acesso ou palavra-passe<input type="password" name="code" autocomplete="current-password" required></label>
         <button class="primary">Entrar</button>
       </form>
+      <p class="login-link"><a href="/recuperar">Esqueci-me do acesso</a></p>
     </main>
   `);
 }
@@ -176,35 +212,65 @@ export function clientEventPage(
   `);
 }
 
-export function clientGalleryPage(event: EventRecord, album: AlbumPhoto[]): string {
+export function clientGalleryIndex(event: EventRecord, missions: AlbumMission[]): string {
   const base = `/cliente/eventos/${event.id}`;
-  const ready = album.filter((photo) => photo.preview_status === "ready");
-  const groups = new Map<string, { photo: AlbumPhoto; index: number }[]>();
-  ready.forEach((photo, index) => {
-    const group = groups.get(photo.mission_title) ?? [];
-    group.push({ photo, index });
-    groups.set(photo.mission_title, group);
-  });
+  const total = missions.reduce((sum, mission) => sum + mission.photos, 0);
   return clientShell("Galeria", html`
     <a class="back" href="${base}">Voltar ao evento</a>
     <div class="page-head">
       <h1>Galeria</h1>
       <a class="primary" href="${base}/fotos.zip">Descarregar ZIP</a>
     </div>
-    ${ready.length === 0 && html`<div class="empty"><p>As fotografias aparecem aqui quando os convidados começarem a enviar.</p></div>`}
-    ${[...groups].map(([title, photos]) => html`
-      <section class="client-section">
-        <h2>${title}</h2>
-        <ul class="photo-grid client-grid">
-          ${photos.map(({ photo, index }) => html`
+    <p class="lead">${total} ${total === 1 ? "fotografia" : "fotografias"} em ${missions.length} ${missions.length === 1 ? "missão" : "missões"}. Abre uma missão para veres as fotografias.</p>
+    ${missions.length === 0
+      ? html`<div class="empty"><p>Este evento ainda não tem missões.</p></div>`
+      : html`<ul class="album-missions">
+          ${missions.map((mission) => html`
+            <li><a href="${base}/galeria?missao=${mission.id}">
+              ${mission.cover
+                ? html`<img src="${base}/fotos/${mission.cover}/thumb" alt="" width="480" height="480" loading="lazy">`
+                : html`<span class="album-empty">Sem fotografias</span>`}
+              <span class="album-title">${mission.title}</span>
+              <span class="album-count">${mission.photos} ${mission.photos === 1 ? "fotografia" : "fotografias"}</span>
+            </a></li>`)}
+        </ul>`}
+  `);
+}
+
+export function clientGalleryPage(event: EventRecord, album: AlbumPage, pageNumber: number, pageSize: number, search: string): string {
+  const base = `/cliente/eventos/${event.id}`;
+  const ready = album.photos.filter((photo) => photo.preview_status === "ready");
+  const pages = Math.max(1, Math.ceil(album.total / pageSize));
+  const link = (target: number) => {
+    const params = new URLSearchParams({ missao: album.mission.id, pagina: String(target) });
+    if (search) params.set("nome", search);
+    return `${base}/galeria?${params}`;
+  };
+  return clientShell(album.mission.title, html`
+    <a class="back" href="${base}/galeria">Voltar às missões</a>
+    <h1>${album.mission.title}</h1>
+    <p class="lead">${album.total} ${album.total === 1 ? "fotografia" : "fotografias"}${search && ` de “${search}”`}.</p>
+    <form method="get" action="${base}/galeria" class="inline-form gallery-search">
+      <input type="hidden" name="missao" value="${album.mission.id}">
+      <input type="search" name="nome" value="${search}" placeholder="Procurar por convidado" aria-label="Procurar por convidado">
+      <button>Procurar</button>
+    </form>
+    ${ready.length === 0
+      ? html`<div class="empty"><p>Não há fotografias para mostrar.</p></div>`
+      : html`<ul class="photo-grid client-grid">
+          ${ready.map((photo, index) => html`
             <li>
               <a href="${base}/fotos/${photo.id}/preview" data-open="${index}">
                 <img src="${base}/fotos/${photo.id}/thumb" alt="${photo.caption || `Fotografia de ${photo.guest_name}`}" width="480" height="480" loading="lazy">
               </a>
               <p class="photo-author">${photo.guest_name}</p>
             </li>`)}
-        </ul>
-      </section>`)}
+        </ul>`}
+    ${pages > 1 && html`<nav class="pagination" aria-label="Páginas">
+      ${pageNumber > 1 ? html`<a class="action" href="${link(pageNumber - 1)}">Anterior</a>` : ""}
+      <span>Página ${pageNumber} de ${pages}</span>
+      ${pageNumber < pages ? html`<a class="action" href="${link(pageNumber + 1)}">Seguinte</a>` : ""}
+    </nav>`}
     ${ready.length > 0 && html`
       <div class="viewer" data-viewer hidden role="dialog" aria-modal="true" aria-label="Galeria de fotografias">
         <div class="viewer-bar"><span data-counter aria-live="polite"></span><button class="viewer-close" data-close>Fechar</button></div>

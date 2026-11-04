@@ -4,14 +4,15 @@ import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
 import type { Organizer } from "../lib/organizers";
 import type { MonthRow, Stats } from "../lib/stats";
-import { shell } from "./admin";
+import type { EventRecord } from "../db/events";
+import { eventRows, shell } from "./admin";
 
 function organizerRow(organizer: Organizer): Html {
   const base = `/admin/organizadores/${organizer.id}`;
   return html`
     <li>
-      <p class="admin-email"><strong>${organizer.name}</strong> ${organizer.email}<br>
-        ${organizer.events} ${organizer.events === 1 ? "evento" : "eventos"}, ${organizer.active ? "conta ativa" : "conta desativada"}</p>
+      <p class="admin-email"><strong><a href="${base}">${organizer.name}</a></strong> ${organizer.email}<br>
+        <a href="${base}">${organizer.events} ${organizer.events === 1 ? "evento" : "eventos"}</a>, ${organizer.active ? "conta ativa" : "conta desativada"}</p>
       <form method="post" action="${base}/palavra-passe" class="inline-form">
         <input type="password" name="password" autocomplete="new-password" minlength="12" required placeholder="Nova palavra-passe" aria-label="Nova palavra-passe de ${organizer.name}">
         <button>Mudar</button>
@@ -42,6 +43,17 @@ export function organizersPage(organizers: Organizer[], error?: string): string 
         <button class="primary">Adicionar organizador</button>
       </form>
     </div>
+  `);
+}
+
+export function organizerPage(organizer: Organizer, events: EventRecord[], retentionDays: number): string {
+  return shell(organizer.name, html`
+    <a class="back" href="/admin/organizadores">Voltar aos organizadores</a>
+    <h1>${organizer.name}</h1>
+    <p class="lead">${organizer.email}, ${organizer.active ? "conta ativa" : "conta desativada"}.</p>
+    ${events.length === 0
+      ? html`<div class="empty"><p>Este organizador ainda não criou eventos.</p></div>`
+      : eventRows(events, retentionDays, new Map([[organizer.id, organizer.name]]))}
   `);
 }
 
@@ -172,6 +184,7 @@ const AUDIENCE_HINTS: Record<TemplateKey, string> = {
   missoes: "Automático, só se o ativares em Definições.",
   votacao: "Automático, só se o ativares em Definições.",
   vencedor: "Automático, só se o ativares em Definições.",
+  recuperacao: "Vai para quem pede para recuperar o acesso, em Área de cliente.",
 };
 
 export function emailsPage(templates: Record<TemplateKey, EmailTemplate>, sample: Record<string, string>, notice: EmailsNotice = {}): string {

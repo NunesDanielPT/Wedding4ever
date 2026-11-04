@@ -2,7 +2,7 @@ import { asset } from "../lib/assets";
 import { brand } from "../lib/brand";
 import { STATUS_LABELS } from "./admin";
 import { eventDesign, type EventRecord, type EventStatus, type Mission } from "../db/events";
-import { formatDate, initials } from "../lib/format";
+import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
 import type { Guest } from "../lib/event-auth";
 import { MAX_CAPTION_LENGTH, type MissionDetail, type Photo } from "../lib/photos";
@@ -68,7 +68,7 @@ function heading(event: EventRecord): Html {
   const design = eventDesign(event);
   return html`
     ${design.logoImage && html`<img class="guest-logo" src="/e/${event.slug}/media/logo" alt="">`}
-    ${!design.logoImage && html`<p class="card-monogram" aria-hidden="true">${initials(event.name)}</p>`}
+    ${!design.logoImage && design.monogram && html`<p class="card-monogram" aria-hidden="true">${design.monogram}</p>`}
     <h1>${event.name}</h1>
     <p class="card-date">${formatDate(event.event_date)}</p>
     <p class="guest-title">${design.headline}</p>

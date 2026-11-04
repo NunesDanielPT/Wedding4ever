@@ -53,7 +53,7 @@ export async function loginClient(emailInput: string, code: string): Promise<str
   const password = await organizerHash(email);
   let valid = password ? await Bun.password.verify(code, password) : false;
   for (const row of rows) {
-    if (await Bun.password.verify(normalized, row.couple_code_hash)) valid = true;
+    if ((await Bun.password.verify(code.trim(), row.couple_code_hash)) || (await Bun.password.verify(normalized, row.couple_code_hash))) valid = true;
   }
   if (!valid) {
     recordFailure(key);
@@ -80,6 +80,46 @@ export async function currentClientEmail(req: Request): Promise<string | undefin
 export async function logoutClient(req: Request): Promise<void> {
   const token = readCookie(req, CLIENT_COOKIE);
   if (token) await central`DELETE FROM client_sessions WHERE token_hash = ${hashToken(token)}`;
+}
+
+const RESET_HOURS = 1;
+
+/** Cria o link e devolve-o só se o e-mail existir; quem pede não fica a saber se existe. */
+export async function createPasswordReset(emailInput: string): Promise<string | null> {
+  const email = emailInput.trim().toLowerCase();
+  const rows = await central`
+    SELECT 1 FROM organizers WHERE email = ${email} AND active
+    UNION ALL
+    SELECT 1 FROM events WHERE couple_email = ${email}
+    LIMIT 1
+  `;
+  if (rows.length === 0) return null;
+  const token = newToken();
+  await central`DELETE FROM password_resets WHERE email = ${email} OR expires_at < now()`;
+  await central`
+    INSERT INTO password_resets (token_hash, email, expires_at)
+    VALUES (${hashToken(token)}, ${email}, ${new Date(Date.now() + RESET_HOURS * 3_600_000)})
+  `;
+  return token;
+}
+
+export async function isResetValid(token: string): Promise<boolean> {
+  const rows = await central`SELECT 1 FROM password_resets WHERE token_hash = ${hashToken(token)} AND expires_at > now()`;
+  return rows.length > 0;
+}
+
+/** Define a nova palavra-passe, invalida o link e termina as sessões abertas. */
+export async function applyPasswordReset(token: string, password: string): Promise<boolean> {
+  const rows: { email: string }[] = await central`
+    DELETE FROM password_resets WHERE token_hash = ${hashToken(token)} AND expires_at > now() RETURNING email
+  `;
+  const email = rows[0]?.email;
+  if (!email) return false;
+  const hash = await Bun.password.hash(password);
+  await central`UPDATE organizers SET password_hash = ${hash} WHERE email = ${email}`;
+  await central`UPDATE events SET couple_code_hash = ${hash} WHERE couple_email = ${email}`;
+  await central`DELETE FROM client_sessions WHERE email = ${email}`;
+  return true;
 }
 
 export interface Guest {

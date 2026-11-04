@@ -22,6 +22,7 @@ export interface Design {
   showDate: boolean;
   showUrl: boolean;
   extraText: string;
+  monogram: string;
   backgroundImage?: ImageExtension;
   logoImage?: ImageExtension;
 }
@@ -41,6 +42,7 @@ export const DEFAULT_DESIGN: Design = {
   showDate: true,
   showUrl: true,
   extraText: "",
+  monogram: "",
 };
 
 type Colors = Pick<Design, "backgroundColor" | "textColor" | "accentColor" | "qrColor" | "qrBackground">;
@@ -69,6 +71,7 @@ export function resolveDesign(raw: unknown): Design {
   if (typeof stored.headline === "string" && stored.headline) design.headline = stored.headline;
   if (typeof stored.instructions === "string" && stored.instructions) design.instructions = stored.instructions;
   if (typeof stored.extraText === "string") design.extraText = stored.extraText;
+  if (typeof stored.monogram === "string") design.monogram = stored.monogram;
   if (typeof stored.font === "string" && stored.font in FONTS) design.font = stored.font as DesignFont;
   if (typeof stored.borderStyle === "string" && stored.borderStyle in BORDERS) design.borderStyle = stored.borderStyle as BorderStyle;
   if (typeof stored.qrSize === "string" && stored.qrSize in QR_SIZES) design.qrSize = stored.qrSize as QrSize;
@@ -102,6 +105,7 @@ export function validateDesign(design: Design): string | undefined {
   if (!design.instructions.trim() || design.instructions.length > 120) {
     return "A instrução tem de ter entre 1 e 120 caracteres.";
   }
+  if (design.monogram.length > 12) return "O texto de destaque pode ter até 12 caracteres.";
   if (design.extraText.length > 120) return "O texto adicional pode ter até 120 caracteres.";
   if (!(design.font in FONTS) || !(design.borderStyle in BORDERS) || !(design.qrSize in QR_SIZES)) return "Escolhe opções válidas.";
   if (!Number.isInteger(design.overlay) || design.overlay < 0 || design.overlay > 80) return "Escolhe um véu entre 0% e 80%.";

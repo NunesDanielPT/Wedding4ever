@@ -52,7 +52,7 @@ import { queueNotifications, sendDownloadEmails } from "./lib/notifications";
 import { archiveEvent } from "./lib/stats";
 import * as admin from "./views/admin";
 
-const VERSION = "2026-11-04-download";
+const VERSION = "2026-11-04-galeria";
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
@@ -250,7 +250,8 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     return handleSiteAdmin(req, path);
   }
   if (path === "/admin" && req.method === "GET") {
-    return htmlResponse(admin.dashboardPage(await listEvents(), await countUnreadMessages(), (await getSettings()).retentionDays));
+    const view = new URL(req.url).searchParams.get("ver") === "organizadores" ? "organizadores" : "admin";
+    return htmlResponse(admin.dashboardPage(await listEvents(), await countUnreadMessages(), (await getSettings()).retentionDays, await listOrganizers(), view));
   }
   if (path === "/admin/clientes/novo" && req.method === "GET") {
     return htmlResponse(admin.newEventPage((await getSite()).packs, {}, undefined, { action: "/admin/clientes", back: "/admin", organizers: await listOrganizers() }));

@@ -12,14 +12,29 @@ import {
 } from "../db/events";
 import { isAuthenticated } from "../lib/auth";
 import { cardsPdfResponse, qrPngResponse, qrSvgResponse } from "../lib/event-assets";
-import { clientCookie, currentClientEmail, generateClientCode, isClientLocked, loginClient, logoutClient } from "../lib/event-auth";
+import { MIN_ADMIN_PASSWORD } from "../lib/auth";
+import { config } from "../config";
+import { brand } from "../lib/brand";
+import { getTemplates, renderTemplate } from "../lib/email-templates";
+import { sendMail } from "../lib/mail";
+import {
+  applyPasswordReset,
+  clientCookie,
+  createPasswordReset,
+  currentClientEmail,
+  generateClientCode,
+  isClientLocked,
+  isResetValid,
+  loginClient,
+  logoutClient,
+} from "../lib/event-auth";
 import { findActiveOrganizer } from "../lib/organizers";
 import { getSettings } from "../lib/settings";
 import { getSite } from "../lib/site";
-import { getWinners, listAdminMissions, listAlbum, MISSION_PHASES, setMissionPhase, type MissionPhase } from "../lib/missions";
+import { getAlbumPage, getWinners, isAlbumPhoto, listAdminMissions, listAlbumMissions, MISSION_PHASES, setMissionPhase, type MissionPhase } from "../lib/missions";
 import { previewPath, schedulePreview, thumbPath } from "../lib/photos";
 import { albumZip } from "../lib/album";
-import { clientContext, clientEventPage, clientEventsPage, clientExpiredPage, clientGalleryPage, clientLoginPage, clientShell } from "../views/client";
+import { clientContext, clientEventPage, clientEventsPage, clientExpiredPage, clientGalleryIndex, clientGalleryPage, clientLoginPage, clientShell, recoverPage, resetPage } from "../views/client";
 import { designPage, newEventPage } from "../views/admin";
 import { queueEventEmails } from "../lib/event-emails";
 import { queueNotifications } from "../lib/notifications";
@@ -28,8 +43,9 @@ import { winnersPage } from "../views/winners";
 import { handleDesign } from "./design";
 import { readEventForm } from "./event-form";
 import { handleMissions } from "./missions";
-import { field, htmlResponse, notFound, redirect } from "./http";
+import { field, htmlResponse, isEmail, notFound, redirect } from "./http";
 
+const GALLERY_PAGE_SIZE = 60;
 const CLIENT_STATUSES = EVENT_STATUSES.filter((status) => status !== "arquivado");
 
 async function eventPage(event: EventRecord, canManage: boolean, status = 200, error?: string, code?: string): Promise<Response> {
@@ -56,16 +72,21 @@ async function handleEventArea(req: Request, event: EventRecord, action: string,
     if (action === "personalizar") return htmlResponse(designPage(event, eventDesign(event), undefined, clientContext(event), url.searchParams.has("guardado")));
     if (action === "vencedores") return htmlResponse(winnersPage(event, await getWinners(event.db_name), `${base}/fotos`, base));
     if (action === "galeria") {
-      const album = await listAlbum(event.db_name);
-      for (const photo of album) {
+      const missionId = url.searchParams.get("missao");
+      if (!missionId) return htmlResponse(clientGalleryIndex(event, await listAlbumMissions(event.db_name)));
+      if (!/^[0-9a-f-]{36}$/.test(missionId)) return notFound();
+      const page = Math.max(1, Math.min(Number(url.searchParams.get("pagina")) || 1, 100_000));
+      const search = (url.searchParams.get("nome") ?? "").trim().slice(0, 80);
+      const album = await getAlbumPage(event.db_name, missionId, page, GALLERY_PAGE_SIZE, search);
+      if (!album) return notFound();
+      for (const photo of album.photos) {
         if (photo.preview_status === "pending") schedulePreview(event, photo.id, photo.extension);
       }
-      return htmlResponse(clientGalleryPage(event, album));
+      return htmlResponse(clientGalleryPage(event, album, page, GALLERY_PAGE_SIZE, search));
     }
     const photo = action.match(/^fotos\/([0-9a-f-]{36})\/(thumb|preview)$/);
     if (photo) {
-      const belongs = (await listAlbum(event.db_name)).some((item) => item.id === photo[1] && item.preview_status === "ready");
-      if (!belongs) return notFound();
+      if (!(await isAlbumPhoto(event.db_name, photo[1]!))) return notFound();
       const thumb = Bun.file(thumbPath(event.id, photo[1]!));
       const useThumb = photo[2] === "thumb" && (await thumb.exists());
       return new Response(useThumb ? thumb : Bun.file(previewPath(event.id, photo[1]!)), {
@@ -101,11 +122,60 @@ async function handleEventArea(req: Request, event: EventRecord, action: string,
   return notFound();
 }
 
+const resetAttempts = new Map<string, number[]>();
+
+function resetLimited(email: string): boolean {
+  const now = Date.now();
+  if (resetAttempts.size > 10_000) resetAttempts.clear();
+  const recent = (resetAttempts.get(email) ?? []).filter((at) => now - at < 3_600_000);
+  recent.push(now);
+  resetAttempts.set(email, recent);
+  return recent.length > 3;
+}
+
+async function sendResetEmail(email: string): Promise<void> {
+  const settings = await getSettings();
+  if (!settings.email.enabled || !settings.email.host) return;
+  const token = await createPasswordReset(email);
+  if (!token) return;
+  const template = (await getTemplates()).recuperacao;
+  const variables = { link: `${config.publicUrl}/recuperar/${token}`, plataforma: brand() };
+  await sendMail(settings.email, {
+    to: email,
+    subject: renderTemplate(template.subject, variables),
+    text: renderTemplate(template.body, variables),
+  });
+}
+
+async function handleRecovery(req: Request, path: string): Promise<Response> {
+  if (path === "/recuperar") {
+    if (req.method === "GET") return htmlResponse(recoverPage());
+    if (req.method !== "POST") return notFound();
+    const email = field(await req.formData(), "email").toLowerCase();
+    if (isEmail(email) && !resetLimited(email)) {
+      void sendResetEmail(email).catch((cause) => console.error("Falha na recuperação de acesso", cause));
+    }
+    return htmlResponse(recoverPage("Se este e-mail tiver conta, vais receber um link em alguns minutos. Se não chegar, fala com a organização."));
+  }
+  const token = path.slice("/recuperar/".length);
+  if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return notFound();
+  if (!(await isResetValid(token))) return htmlResponse(recoverPage(undefined, "Este link já não é válido. Pede um novo."), 410);
+  if (req.method === "GET") return htmlResponse(resetPage(token));
+  if (req.method !== "POST") return notFound();
+  const password = String((await req.formData()).get("password") ?? "");
+  if (password.length < MIN_ADMIN_PASSWORD) {
+    return htmlResponse(resetPage(token, `A palavra-passe tem de ter pelo menos ${MIN_ADMIN_PASSWORD} caracteres.`), 422);
+  }
+  await applyPasswordReset(token, password);
+  return redirect("/entrar?alterada=1");
+}
+
 export async function handleClient(req: Request, path: string): Promise<Response | undefined> {
+  if (path === "/recuperar" || path.startsWith("/recuperar/")) return handleRecovery(req, path);
   if (path === "/entrar") {
     if (req.method === "GET") {
       if (await currentClientEmail(req)) return redirect("/cliente");
-      return htmlResponse(clientLoginPage());
+      return htmlResponse(clientLoginPage(undefined, new URL(req.url).searchParams.has("alterada")));
     }
     if (req.method !== "POST") return notFound();
     const form = await req.formData();

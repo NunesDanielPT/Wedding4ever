@@ -30,6 +30,8 @@
     text("headline", value("headline"));
     text("instructions", value("instructions"));
     text("extra", value("extraText"));
+    text("monogram", value("monogram"));
+    toggle("monogram", Boolean(value("monogram")));
     toggle("date", form.elements.showDate?.checked);
     toggle("url", form.elements.showUrl?.checked);
     card.dataset.font = value("font");

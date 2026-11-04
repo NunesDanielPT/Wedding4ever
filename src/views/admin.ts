@@ -1,10 +1,10 @@
 import { asset } from "../lib/assets";
 import { brand } from "../lib/brand";
-import { EVENT_STATUSES, type EventRecord, type EventStats, type EventStatus, type RegisteredGuest } from "../db/events";
+import { EVENT_STATUSES, eventDesign, type EventRecord, type EventStats, type EventStatus, type RegisteredGuest } from "../db/events";
 import type { Admin } from "../lib/auth";
 import type { Design } from "../lib/design";
 import { eventUrl } from "../lib/event-assets";
-import { formatDate, initials } from "../lib/format";
+import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
 import { AUDIENCE_LABELS } from "../lib/email-templates";
 import { retentionOf } from "../lib/retention";
@@ -70,8 +70,41 @@ function retentionLabel(event: EventRecord, days: number): string {
   return daysLeft === 0 ? "Último dia antes de apagar" : `Faltam ${daysLeft} ${daysLeft === 1 ? "dia" : "dias"} para apagar`;
 }
 
-export function dashboardPage(events: EventRecord[], unread = 0, retentionDays = 30): string {
+export function eventRows(events: EventRecord[], retentionDays: number, organizerNames: Map<string, string>): Html {
+  return html`<ul class="client-list event-list">
+    ${events.map((event) => html`
+      <li>
+        <a href="/admin/clientes/${event.id}">
+          <span class="client-name">${event.name}
+            ${event.organizer_id && html`<span class="organizer-tag">${organizerNames.get(event.organizer_id) ?? "Organizador"}</span>`}
+          </span>
+          <span class="client-date">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}<br>
+            <span class="${retentionOf(event.event_date, retentionDays).expired ? "retention-late" : ""}">${retentionLabel(event, retentionDays)}</span></span>
+          <span class="status status-${event.status}">${STATUS_LABELS[event.status]}</span>
+        </a>
+      </li>`)}
+  </ul>`;
+}
+
+export interface OrganizerRef {
+  id: string;
+  name: string;
+}
+
+export function dashboardPage(
+  events: EventRecord[],
+  unread: number,
+  retentionDays: number,
+  organizers: OrganizerRef[],
+  view: "admin" | "organizadores",
+): string {
   const expired = events.filter((event) => retentionOf(event.event_date, retentionDays).expired).length;
+  const names = new Map(organizers.map((organizer) => [organizer.id, organizer.name]));
+  const own = events.filter((event) => !event.organizer_id);
+  const external = events.filter((event) => event.organizer_id);
+  const groups = organizers
+    .map((organizer) => ({ organizer, events: external.filter((event) => event.organizer_id === organizer.id) }))
+    .filter((group) => group.events.length > 0);
   return shell("Eventos", html`
     <div class="page-head">
       <h1>Eventos</h1>
@@ -79,20 +112,24 @@ export function dashboardPage(events: EventRecord[], unread = 0, retentionDays =
     </div>
     ${expired > 0 && html`<p class="error" role="status">${expired === 1 ? "1 evento já passou do prazo e está à espera de ser apagado." : `${expired} eventos já passaram do prazo e estão à espera de ser apagados.`} Só tu os podes apagar, na página de cada evento.</p>`}
     ${unread > 0 && html`<p class="notice"><a href="/admin/mensagens">${unread === 1 ? "Tens 1 mensagem por ler." : `Tens ${unread} mensagens por ler.`}</a></p>`}
-    ${events.length === 0
-      ? html`<div class="empty"><p>Ainda não tens eventos. Cria o primeiro para gerar o link, o QR Code e a base de dados.</p></div>`
-      : html`<ul class="client-list">
-          ${events.map((event) => html`
-            <li>
-              <a href="/admin/clientes/${event.id}">
-                <span class="monogram" aria-hidden="true">${initials(event.name)}</span>
-                <span class="client-name">${event.name}</span>
-                <span class="client-date">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}<br>
-                  <span class="${retentionOf(event.event_date, retentionDays).expired ? "retention-late" : ""}">${retentionLabel(event, retentionDays)}</span></span>
-                <span class="status status-${event.status}">${STATUS_LABELS[event.status]}</span>
-              </a>
-            </li>`)}
-        </ul>`}
+    <nav class="tabs" aria-label="Filtrar eventos">
+      <a href="/admin" ${view === "admin" ? new Html('aria-current="page"') : ""}>Da administração (${own.length})</a>
+      <a href="/admin?ver=organizadores" ${view === "organizadores" ? new Html('aria-current="page"') : ""}>De organizadores (${external.length})</a>
+    </nav>
+    ${view === "admin"
+      ? own.length === 0
+        ? html`<div class="empty"><p>Ainda não tens eventos criados pela administração.</p></div>`
+        : eventRows(own, retentionDays, names)
+      : groups.length === 0
+        ? html`<div class="empty"><p>Os eventos criados por organizadores aparecem aqui.</p></div>`
+        : groups.map(({ organizer, events: list }) => html`
+            <section class="organizer-group">
+              <div class="page-head">
+                <h2>${organizer.name}</h2>
+                <a href="/admin/organizadores/${organizer.id}">Ver organizador</a>
+              </div>
+              ${eventRows(list, retentionDays, names)}
+            </section>`)}
   `);
 }
 
@@ -177,9 +214,16 @@ export function eventPage(
     <a class="back" href="/admin">Voltar aos eventos</a>
     ${error && html`<p class="error" role="alert">${error}</p>`}
     ${event.migration_error && html`<p class="error" role="alert">Esta base não ficou atualizada: ${event.migration_error}</p>`}
+    <nav class="event-actions" aria-label="Gerir evento">
+      <a class="primary" href="/admin/clientes/${event.id}/missoes">Missões e fotografias</a>
+      <a class="action" href="/admin/clientes/${event.id}/personalizar">Personalizar</a>
+      <a class="action" href="/cliente/eventos/${event.id}">Área do cliente</a>
+      <a class="action" href="/cliente/eventos/${event.id}/galeria">Galeria</a>
+      <a class="action" href="/cliente/eventos/${event.id}/vencedores">Vencedores</a>
+    </nav>
     <div class="event-layout">
       <section class="place-card" aria-label="Cartão de mesa">
-        <p class="card-monogram" aria-hidden="true">${initials(event.name)}</p>
+        ${eventDesign(event).monogram && html`<p class="card-monogram" aria-hidden="true">${eventDesign(event).monogram}</p>`}
         <p class="type-label">${EVENT_TYPES[event.event_type].label}</p>
         <h1>${event.name}</h1>
         <p class="card-date">${formatDate(event.event_date)}</p>
@@ -188,7 +232,6 @@ export function eventPage(
           <a href="/admin/clientes/${event.id}/cartoes.pdf">Descarregar cartões em PDF</a>
           <a href="/admin/clientes/${event.id}/qr.png">Descarregar QR Code em PNG</a>
           <a href="/admin/clientes/${event.id}/qr.svg" download="qr-${event.slug}.svg">Descarregar QR Code em SVG</a>
-          <a href="/admin/clientes/${event.id}/personalizar">Personalizar cartões e página</a>
         </p>
       </section>
 
@@ -223,15 +266,6 @@ export function eventPage(
             </label>
             <button class="pack-save">Guardar pack</button>
           </form>
-        </section>
-
-        <section>
-          <h2>Definições do cliente</h2>
-          <p class="downloads">
-            <a href="/admin/clientes/${event.id}/missoes">Missões, fases e fotografias por missão</a>
-            <a href="/admin/clientes/${event.id}/personalizar">Personalizar cartões e página</a>
-            <a href="/cliente/eventos/${event.id}">Abrir a área deste cliente</a>
-          </p>
         </section>
 
         <section>
@@ -359,6 +393,7 @@ export function designPage(event: EventRecord, design: Design, error?: string, c
     ${saved && html`<p class="notice" role="status">Personalização guardada.</p>`}
     <div class="event-layout design-layout">
       <section class="design-card themed t-image" data-design-preview data-font="${design.font}" data-border="${design.borderStyle}" data-qr="${design.qrSize}" aria-label="Pré-visualização">
+        <p class="card-monogram" data-preview="monogram" ${design.monogram ? "" : new Html("hidden")}>${design.monogram}</p>
         <img class="design-logo" data-preview="logo" src="${design.logoImage ? `${mediaBase}/logo?v=${version}` : ""}" alt="" ${design.logoImage ? "" : new Html("hidden")}>
         <h2>${event.name}</h2>
         <p data-preview="date" ${design.showDate ? "" : new Html("hidden")}>${formatDate(event.event_date)}</p>
@@ -381,6 +416,10 @@ export function designPage(event: EventRecord, design: Design, error?: string, c
         </form>
 
         <form method="post" action="${base}/personalizar" enctype="multipart/form-data" class="stack" data-design-form autocomplete="off">
+          <label>Texto de destaque, opcional
+            <input name="monogram" maxlength="12" value="${design.monogram}" placeholder="Por exemplo, A&P">
+            <span class="hint">Aparece por cima do nome do evento. Em branco, não aparece.</span>
+          </label>
           <label>Título<input name="headline" maxlength="60" required value="${design.headline}"></label>
           <label>Instrução para os convidados<input name="instructions" maxlength="120" required value="${design.instructions}"></label>
           <label>Texto adicional, opcional<input name="extraText" maxlength="120" value="${design.extraText}"></label>

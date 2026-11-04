@@ -766,6 +766,9 @@ describe("área de cliente", () => {
 
     const base = `/cliente/eventos/${event.id}`;
     expect(await (await asClient(`${base}/galeria`, session)).text()).toContain(`${base}/fotos/${photo!.id}/thumb`);
+    const galleryPage = await (await asClient(`${base}/galeria?missao=${mission.id}`, session)).text();
+    expect(galleryPage).toContain("data-open=");
+    expect(await (await asClient(`${base}/galeria?missao=${mission.id}&nome=ninguem`, session)).text()).toContain("Não há fotografias");
     expect((await asClient(`${base}/fotos/${photo!.id}/preview`, session)).status).toBe(200);
     expect((await asClient(`${base}/qr.png`, session)).headers.get("content-type")).toBe("image/png");
     expect((await asClient(`${base}/personalizar`, session)).status).toBe(200);
@@ -1048,6 +1051,16 @@ describe("prazo dos eventos", () => {
     expect(archived.activity).not.toContain("arquivo@exemplo.pt");
   }, 20_000);
 
+  test("o texto de destaque só aparece se for definido", async () => {
+    const event = await createClient({ ...couple, name: "Casamento Teste" });
+    const base = `/admin/clientes/${event.id}`;
+    expect(await (await get(base)).text()).not.toContain("card-monogram");
+    await postMultipart(`${base}/personalizar`, designForm({ monogram: "A&P" }));
+    expect(await (await get(`/e/${event.slug}`, false)).text()).toContain("A&amp;P");
+    const pdf = new TextDecoder("latin1").decode(await (await get(`${base}/cartoes.pdf`)).arrayBuffer());
+    expect(pdf).toContain("<412650>");
+  });
+
   test("o prazo é configurável", async () => {
     expect((await post("/admin/definicoes/prazo", { retentionDays: "0" })).status).toBe(422);
     expect((await post("/admin/definicoes/prazo", { retentionDays: "60" })).status).toBe(200);
@@ -1298,4 +1311,69 @@ describe("notificações", () => {
     const home = await (await get("/admin/emails")).text();
     expect(home).toContain("Temos vencedor em {{missao}}");
   });
+});
+
+describe("recuperação de acesso", () => {
+  test("define nova palavra-passe por link, uma vez e sem revelar contas", async () => {
+    const { createPasswordReset } = await import("../src/lib/event-auth");
+    const event = await createClient({ ...couple, name: "Evento recuperar", coupleEmail: "recuperar@exemplo.pt" });
+    const code = (await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text()).match(/<strong>([A-Z2-9]{10})</)![1]!;
+    const session = cookieOf(await post("/entrar", { email: "recuperar@exemplo.pt", code }, { Cookie: "" }));
+
+    expect(await createPasswordReset("nao-existe@exemplo.pt")).toBeNull();
+    const known = await (await post("/recuperar", { email: "recuperar@exemplo.pt" }, { Cookie: "" })).text();
+    const unknown = await (await post("/recuperar", { email: "nao-existe@exemplo.pt" }, { Cookie: "" })).text();
+    expect(known).toBe(unknown);
+
+    const token = (await createPasswordReset("recuperar@exemplo.pt"))!;
+    expect((await get(`/recuperar/${token}`, false)).status).toBe(200);
+    expect((await post(`/recuperar/${token}`, { password: "curta" }, { Cookie: "" })).status).toBe(422);
+    expect((await post(`/recuperar/${token}`, { password: "Nova-Palavra-Passe-1" }, { Cookie: "" })).status).toBe(303);
+    expect((await get(`/recuperar/${token}`, false)).status).toBe(410);
+
+    expect((await post("/entrar", { email: "recuperar@exemplo.pt", code }, { Cookie: "" })).status).toBe(401);
+    expect((await post("/entrar", { email: "recuperar@exemplo.pt", code: "Nova-Palavra-Passe-1" }, { Cookie: "" })).status).toBe(303);
+    const old = await handle(new Request(`${ORIGIN}/cliente`, { headers: { Cookie: session } }));
+    expect(old.status).toBe(303);
+  });
+});
+
+describe("eventos por organizador e galeria", () => {
+  test("separa eventos e mostra a página do organizador", async () => {
+    await post("/admin/organizadores", { name: "Equipa Sol", email: "sol@exemplo.pt", password: "palavra-passe-longa" });
+    const list = await (await get("/admin/organizadores")).text();
+    const row = list.split("<li>").find((item) => item.includes("sol@exemplo.pt"))!;
+    const id = row.match(/organizadores\/([0-9a-f-]{36})/)![1]!;
+    const created = await post("/admin/clientes", { ...couple, name: "Festa da Equipa Sol", organizerId: id });
+    const eventId = created.headers.get("location")!.split("/").pop()!;
+    await createClient({ ...couple, name: "Festa só da administração" });
+
+    const own = await (await get("/admin")).text();
+    expect(own).toContain("Festa só da administração");
+    expect(own).not.toContain("Festa da Equipa Sol");
+    const organizers = await (await get("/admin?ver=organizadores")).text();
+    expect(organizers).toContain("Equipa Sol");
+    expect(organizers).toContain("Festa da Equipa Sol");
+    expect(organizers).not.toContain("Festa só da administração");
+    expect(await (await get(`/admin/organizadores/${id}`)).text()).toContain(`/admin/clientes/${eventId}`);
+  });
+
+  test("divide a galeria em páginas", async () => {
+    const { getAlbumPage } = await import("../src/lib/missions");
+    const event = await createClient({ ...couple, name: "Evento com muitas fotos" });
+    const db = events.eventDb(event.db_name);
+    const [mission] = await db`SELECT id FROM missions ORDER BY position LIMIT 1`;
+    const [guest] = await db`INSERT INTO guests (full_name, email) VALUES ('Muitas Fotos', 'mf@exemplo.pt') RETURNING id`;
+    for (let i = 0; i < 65; i++) {
+      await db`INSERT INTO photos (guest_id, mission_id, storage_key, preview_status) VALUES (${guest.id}::uuid, ${mission.id}::uuid, ${`f${i}.jpg`}, 'ready')`;
+    }
+    const first = (await getAlbumPage(event.db_name, mission.id, 1, 60, ""))!;
+    const second = (await getAlbumPage(event.db_name, mission.id, 2, 60, ""))!;
+    expect(first.total).toBe(65);
+    expect(first.photos).toHaveLength(60);
+    expect(second.photos).toHaveLength(5);
+    expect((await getAlbumPage(event.db_name, mission.id, 1, 60, "ninguém"))!.total).toBe(0);
+    const page = await (await get(`/cliente/eventos/${event.id}/galeria?missao=${mission.id}`)).text();
+    expect(page).toContain("Página 1 de 2");
+  }, 20_000);
 });

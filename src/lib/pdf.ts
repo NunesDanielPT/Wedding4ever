@@ -128,7 +128,9 @@ function card(originX: number, originY: number, content: CardContent, qr: QrCode
     (content.background ? coverImage("Bg", content.background, originX, originY, CARD_W, CARD_H) : "") +
     overlay +
     border +
-    (content.logo ? containImage("Logo", content.logo, cx, originY + 121 * MM, 60 * MM, 15 * MM) : "") +
+    (content.logo
+      ? containImage("Logo", content.logo, cx, originY + 121 * MM, 60 * MM, 15 * MM)
+      : line(design.monogram, 124, heading, 32)) +
     line(content.title, 110, heading, 24) +
     (design.showDate ? line(content.date, 103, heading, 11) : "") +
     line(design.headline, 95, heading, 13) +

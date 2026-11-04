@@ -1,7 +1,7 @@
 import { central } from "../db/central";
 
 export const AUDIENCES = ["cliente", "organizador", "superadmin"] as const;
-export const TEMPLATE_KEYS = [...AUDIENCES, "download", "missoes", "votacao", "vencedor"] as const;
+export const TEMPLATE_KEYS = [...AUDIENCES, "download", "missoes", "votacao", "vencedor", "recuperacao"] as const;
 export type Audience = (typeof AUDIENCES)[number];
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
@@ -18,6 +18,7 @@ export const AUDIENCE_LABELS: Record<TemplateKey, string> = {
   missoes: "Missões abertas, para convidados",
   votacao: "Votação aberta, para convidados",
   vencedor: "Vencedor, para convidados",
+  recuperacao: "Recuperação de acesso",
 };
 
 export const EMAIL_VARIABLES: Record<string, string> = {
@@ -128,6 +129,19 @@ A equipa {{plataforma}}`,
 
 A votação da missão {{missao}}, no evento {{evento}}, já abriu. Escolhe a tua fotografia favorita:
 {{link}}
+
+A equipa {{plataforma}}`,
+  },
+  recuperacao: {
+    subject: "Recupera o acesso à {{plataforma}}",
+    body: `Olá,
+
+Recebemos um pedido para recuperares o acesso à {{plataforma}}.
+
+Usa este link para definires uma nova palavra-passe. É válido durante 1 hora:
+{{link}}
+
+Se não fizeste este pedido, ignora este e-mail.
 
 A equipa {{plataforma}}`,
   },

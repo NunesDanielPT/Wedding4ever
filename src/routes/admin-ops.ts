@@ -5,7 +5,8 @@ import { sendMail } from "../lib/mail";
 import { getSettings } from "../lib/settings";
 import { addOrganizer, listOrganizers, removeOrganizer, setOrganizerActive, setOrganizerPassword } from "../lib/organizers";
 import { getStats } from "../lib/stats";
-import { emailsPage, organizersPage, statsPage, type EmailsNotice } from "../views/admin-ops";
+import { emailsPage, organizerPage, organizersPage, statsPage, type EmailsNotice } from "../views/admin-ops";
+import { listEvents } from "../db/events";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./http";
 
 async function render(error?: string, status = 200): Promise<Response> {
@@ -25,6 +26,14 @@ async function handleOrganizers(req: Request, path: string): Promise<Response> {
     if (password.length < MIN_ADMIN_PASSWORD) return render("A palavra-passe tem de ter pelo menos 12 caracteres.", 422);
     if (!(await addOrganizer(name, email, password))) return render("Esse e-mail já está registado.", 422);
     return redirect("/admin/organizadores");
+  }
+  const detail = path.match(/^\/admin\/organizadores\/([0-9a-f-]{36})$/);
+  if (detail && req.method === "GET") {
+    const organizers = await listOrganizers();
+    const organizer = organizers.find((item) => item.id === detail[1]);
+    if (!organizer) return notFound();
+    const events = (await listEvents()).filter((event) => event.organizer_id === organizer.id);
+    return htmlResponse(organizerPage(organizer, events, (await getSettings()).retentionDays));
   }
   const match = path.match(/^\/admin\/organizadores\/([0-9a-f-]{36})\/(palavra-passe|ativar|desativar|apagar)$/);
   if (!match || req.method !== "POST") return notFound();
@@ -59,7 +68,7 @@ async function renderEmails(notice?: EmailsNotice, status = 200): Promise<Respon
 
 async function handleEmails(req: Request, path: string): Promise<Response> {
   if (path === "/admin/emails") return req.method === "GET" ? renderEmails() : notFound();
-  const match = path.match(/^\/admin\/emails\/(cliente|organizador|superadmin|download|missoes|votacao|vencedor)\/(guardar|repor|testar)$/);
+  const match = path.match(/^\/admin\/emails\/(cliente|organizador|superadmin|download|missoes|votacao|vencedor|recuperacao)\/(guardar|repor|testar)$/);
   if (!match || req.method !== "POST") return notFound();
   const audience = match[1] as TemplateKey;
   const form = await req.formData();

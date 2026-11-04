@@ -54,6 +54,7 @@ export async function handleDesign(req: Request, event: EventRecord, context: ad
     showDate: form.get("showDate") !== null,
     showUrl: form.get("showUrl") !== null,
     extraText: field(form, "extraText"),
+    monogram: field(form, "monogram"),
   };
   const error = validateDesign(design);
   if (error) return htmlResponse(admin.designPage(event, design, error, context), 422);

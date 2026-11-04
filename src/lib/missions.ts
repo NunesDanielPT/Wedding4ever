@@ -130,3 +130,51 @@ export async function listAlbum(dbName: string): Promise<AlbumPhoto[]> {
     WHERE NOT p.hidden ORDER BY m.position, m.created_at, p.created_at
   `;
 }
+
+export interface AlbumMission {
+  id: string;
+  title: string;
+  photos: number;
+  cover: string | null;
+}
+
+/** Resumo da galeria: conta as fotografias sem ler o álbum inteiro. */
+export async function listAlbumMissions(dbName: string): Promise<AlbumMission[]> {
+  return eventDb(dbName)`
+    SELECT m.id, m.title,
+           (SELECT count(*)::int FROM photos p WHERE p.mission_id = m.id AND NOT p.hidden) AS photos,
+           (SELECT p.id FROM photos p WHERE p.mission_id = m.id AND NOT p.hidden AND p.preview_status = 'ready'
+            ORDER BY p.created_at LIMIT 1) AS cover
+    FROM missions m ORDER BY m.position, m.created_at
+  `;
+}
+
+export interface AlbumPage {
+  mission: { id: string; title: string };
+  photos: Pick<AlbumPhoto, "id" | "guest_name" | "caption" | "preview_status" | "extension">[];
+  total: number;
+}
+
+export async function getAlbumPage(dbName: string, missionId: string, page: number, size: number, search: string): Promise<AlbumPage | undefined> {
+  const db = eventDb(dbName);
+  const missions: { id: string; title: string }[] = await db`SELECT id, title FROM missions WHERE id = ${missionId}::uuid`;
+  const mission = missions[0];
+  if (!mission) return undefined;
+  const like = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
+  const [count]: { total: number }[] = await db`
+    SELECT count(*)::int AS total FROM photos p JOIN guests g ON g.id = p.guest_id
+    WHERE p.mission_id = ${missionId}::uuid AND NOT p.hidden AND g.full_name ILIKE ${like}
+  `;
+  const photos: AlbumPage["photos"] = await db`
+    SELECT p.id, g.full_name AS guest_name, p.caption, p.preview_status, p.extension
+    FROM photos p JOIN guests g ON g.id = p.guest_id
+    WHERE p.mission_id = ${missionId}::uuid AND NOT p.hidden AND g.full_name ILIKE ${like}
+    ORDER BY p.created_at, p.id LIMIT ${size} OFFSET ${(page - 1) * size}
+  `;
+  return { mission, photos, total: count!.total };
+}
+
+export async function isAlbumPhoto(dbName: string, photoId: string): Promise<boolean> {
+  const rows = await eventDb(dbName)`SELECT 1 FROM photos WHERE id = ${photoId}::uuid AND NOT hidden AND preview_status = 'ready'`;
+  return rows.length > 0;
+}
