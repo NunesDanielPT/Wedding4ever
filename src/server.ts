@@ -46,11 +46,11 @@ import { handleSite } from "./routes/site";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./routes/http";
 import { brand } from "./lib/brand";
 import { listEmailLog, queueEventEmails, sendEventEmails } from "./lib/event-emails";
-import { queueNotifications } from "./lib/notifications";
+import { getPushStatus, queueNotifications, sendTestNotification } from "./lib/notifications";
 import { archiveEvent } from "./lib/stats";
 import * as admin from "./views/admin";
 
-const VERSION = "2026-11-04-notificacoes";
+const VERSION = "2026-11-04-diagnostico";
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
@@ -91,8 +91,12 @@ async function eventDetail(id: string, error?: string, status = 200, coupleCode?
     console.error(`Base ${event.db_name} indisponível`, cause);
     return [null, []];
   });
-  const [{ retentionDays }, emails] = await Promise.all([getSettings(), listEmailLog(id)]);
-  return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode, retentionDays, emails), status);
+  const [{ retentionDays }, emails, push] = await Promise.all([
+    getSettings(),
+    listEmailLog(id),
+    getPushStatus(event).catch(() => null),
+  ]);
+  return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode, retentionDays, emails, push), status);
 }
 
 
@@ -313,6 +317,13 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     const changed = packId !== "atual";
     const name = changed ? (pack ? `${pack.name} (${pack.guests})` : "") : event.pack_name;
     await setEventPack(id, name, changed ? packGuestLimit(pack) : custom);
+    return redirect(`/admin/clientes/${id}`);
+  }
+
+  if (action === "notificacoes/testar" && req.method === "POST") {
+    const event = await getEventById(id);
+    if (!event) return notFound();
+    await sendTestNotification(event);
     return redirect(`/admin/clientes/${id}`);
   }
 

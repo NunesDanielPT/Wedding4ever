@@ -128,6 +128,9 @@ export async function sendPush(subscription: PushSubscription, payload: string, 
     signal: AbortSignal.timeout(15_000),
   });
   if (response.status === 404 || response.status === 410) return false;
-  if (!response.ok) throw new Error(`Serviço de notificações respondeu ${response.status}`);
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 200);
+    throw new Error(`Serviço de notificações respondeu ${response.status}. ${detail}`);
+  }
   return true;
 }

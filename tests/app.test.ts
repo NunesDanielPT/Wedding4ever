@@ -1249,6 +1249,21 @@ describe("notificações", () => {
     await notifyEventChanges(event.id);
     await notifyEventChanges(event.id);
     expect((await keys()).filter((key: string) => key.startsWith("votacao"))).toHaveLength(1);
+
+    await setMissionPhase(event.db_name, mission.id, "envio");
+    await notifyEventChanges(event.id);
+    expect((await keys()).filter((key: string) => key.startsWith("votacao"))).toHaveLength(0);
+    await setMissionPhase(event.db_name, mission.id, "votacao");
+    await notifyEventChanges(event.id);
+    expect((await keys()).filter((key: string) => key.startsWith("votacao"))).toHaveLength(1);
+  });
+
+  test("mostra no painel quantos telemóveis estão ativos e o resultado do teste", async () => {
+    const event = await createClient({ ...couple, name: "Evento diagnóstico" });
+    expect(await (await get(`/admin/clientes/${event.id}`)).text()).toContain("0 telemóveis com notificações ativas");
+    expect((await post(`/admin/clientes/${event.id}/notificacoes/testar`, {})).status).toBe(303);
+    expect(await (await get(`/admin/clientes/${event.id}`)).text()).toContain("0 de 0 aceites");
+    expect((await post(`/admin/clientes/${event.id}/notificacoes/testar`, {}, { Cookie: "" })).status).toBe(401);
   });
 
   test("o e-mail de vencedor é editável", async () => {

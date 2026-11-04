@@ -9,6 +9,7 @@ import { html, Html } from "../lib/html";
 import { AUDIENCE_LABELS } from "../lib/email-templates";
 import { retentionOf } from "../lib/retention";
 import type { EmailLogRow } from "../lib/event-emails";
+import type { PushStatus } from "../lib/notifications";
 import type { SiteItem } from "../lib/site";
 import { MAX_TITLE_LENGTH, MISSION_PHASES, PHASE_LABELS, type AdminMission } from "../lib/missions";
 import { EVENT_TYPE_IDS, EVENT_TYPES } from "../lib/event-types";
@@ -169,6 +170,7 @@ export function eventPage(
   coupleCode?: string,
   retentionDays = 30,
   emails: EmailLogRow[] = [],
+  push: PushStatus | null = null,
 ): string {
   const url = eventUrl(event);
   const retention = retentionOf(event.event_date, retentionDays);
@@ -281,6 +283,16 @@ export function eventPage(
         </details>
       </div>
     </div>
+
+    ${push && html`<section class="guests-section">
+      <h2>Notificações no telemóvel</h2>
+      <p>${push.subscribers === 1 ? "1 telemóvel com notificações ativas." : `${push.subscribers} telemóveis com notificações ativas.`}</p>
+      ${push.last && html`<p class="${push.last.error ? "error" : "notice"}" role="status">
+        Último envio, ${push.last.title}: ${push.last.sent} de ${push.last.total} aceites pelo serviço de notificações${push.last.removed > 0 ? `, ${push.last.removed} já cancelados` : ""}.
+        ${push.last.error && html`<br>Erro: ${push.last.error}`}
+      </p>`}
+      <form method="post" action="/admin/clientes/${event.id}/notificacoes/testar"><button>Enviar notificação de teste</button></form>
+    </section>`}
 
     <section class="guests-section">
       <h2>E-mails do evento</h2>
