@@ -39,6 +39,7 @@ import { designPage, newEventPage } from "../views/admin";
 import { queueEventEmails } from "../lib/event-emails";
 import { queueNotifications } from "../lib/notifications";
 import { retentionOf } from "../lib/retention";
+import { runAsAdmin } from "../lib/viewer";
 import { winnersPage } from "../views/winners";
 import { handleDesign } from "./design";
 import { readEventForm } from "./event-form";
@@ -234,5 +235,5 @@ export async function handleClient(req: Request, path: string): Promise<Response
   const { retentionDays } = await getSettings();
   const retention = retentionOf(event.event_date, retentionDays);
   if (retention.expired && !isAdmin) return htmlResponse(clientExpiredPage(event, retention.deleteDate), 410);
-  return handleEventArea(req, event, match[2] ?? "", isAdmin || owns);
+  return runAsAdmin(isAdmin, () => handleEventArea(req, event, match[2] ?? "", isAdmin || owns));
 }

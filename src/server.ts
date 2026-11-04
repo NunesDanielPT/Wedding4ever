@@ -52,7 +52,7 @@ import { queueNotifications, sendDownloadEmails } from "./lib/notifications";
 import { archiveEvent } from "./lib/stats";
 import * as admin from "./views/admin";
 
-const VERSION = "2026-11-04-galeria";
+const VERSION = "2026-11-04-menu";
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",

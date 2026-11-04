@@ -1377,3 +1377,21 @@ describe("eventos por organizador e galeria", () => {
     expect(page).toContain("Página 1 de 2");
   }, 20_000);
 });
+
+describe("superadmin na área de um evento", () => {
+  test("mantém o menu de administração e volta ao painel", async () => {
+    const event = await createClient({ ...couple, name: "Evento com menu", coupleEmail: "menu@exemplo.pt" });
+    const code = (await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text()).match(/<strong>([A-Z2-9]{10})</)![1]!;
+    for (const path of ["", "/galeria"]) {
+      const body = await (await get(`/cliente/eventos/${event.id}${path}`)).text();
+      expect(body).toContain('href="/admin/organizadores"');
+      expect(body).not.toContain("Os meus eventos");
+    }
+    expect(await (await get(`/cliente/eventos/${event.id}`)).text()).toContain(`href="/admin/clientes/${event.id}"`);
+
+    const session = cookieOf(await post("/entrar", { email: "menu@exemplo.pt", code }, { Cookie: "" }));
+    const asClient = await (await handle(new Request(`${ORIGIN}/cliente/eventos/${event.id}`, { headers: { Cookie: session } }))).text();
+    expect(asClient).toContain("Os meus eventos");
+    expect(asClient).not.toContain('href="/admin/organizadores"');
+  });
+});

@@ -7,12 +7,14 @@ import { html, Html } from "../lib/html";
 import { PHASE_LABELS, type AdminMission, type AlbumMission, type AlbumPage, type MissionPhase } from "../lib/missions";
 import { EVENT_TYPES } from "../lib/event-types";
 import { retentionOf } from "../lib/retention";
-import { type DesignContext, STATUS_LABELS } from "./admin";
+import { isAdminViewer } from "../lib/viewer";
+import { type DesignContext, shell, STATUS_LABELS } from "./admin";
 import { appShell } from "./app-shell";
 import { guestTable } from "./guests";
 import { page, rings } from "./layout";
 
 export function clientShell(title: string, content: Html, stylesheet?: string): string {
+  if (isAdminViewer()) return shell(title, content, stylesheet);
   return appShell({
     title,
     home: "/cliente",
@@ -148,7 +150,7 @@ export function clientEventPage(
 ): string {
   const base = `/cliente/eventos/${event.id}`;
   return clientShell(event.name, html`
-    <a class="back" href="/cliente">Voltar aos eventos</a>
+    <a class="back" href="${isAdminViewer() ? `/admin/clientes/${event.id}` : "/cliente"}">${isAdminViewer() ? "Voltar ao painel do evento" : "Voltar aos eventos"}</a>
     <h1>${event.name}</h1>
     <p class="lead">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}${event.pack_name && `. Pack ${event.pack_name}`}</p>
     ${error && html`<p class="error" role="alert">${error}</p>`}
