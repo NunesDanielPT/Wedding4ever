@@ -587,3 +587,11 @@ fieldset { background: var(--card); border-color: var(--line); border-radius: va
 @media (prefers-reduced-motion: reduce) {
   .live-winner .winner-word { animation: none; }
 }
+
+.winner-hero { border-radius: var(--radius-lg); margin: 1.25rem 0 1.5rem; padding: 1.25rem 1rem 1.5rem; position: relative; text-align: center; }
+.winner-hero figure { margin: 0 0 1rem; position: relative; z-index: 1; }
+.winner-hero img { border: 3px solid #e6c878; border-radius: var(--radius-md); box-shadow: 0 0 34px rgba(230, 200, 120, .5); display: block; height: auto; margin: 0 auto; max-height: 60dvh; max-width: 100%; }
+.winner-hero figcaption { display: grid; gap: .1rem; margin-top: .75rem; }
+.winner-hero strong { font-family: var(--serif); font-size: 1.6rem; font-weight: 400; }
+.winner-hero span { color: #e6c878; }
+.winner-hero em { overflow-wrap: anywhere; }

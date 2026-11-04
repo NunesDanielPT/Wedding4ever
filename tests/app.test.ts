@@ -612,6 +612,10 @@ describe("envio de fotografias", () => {
     const results = await (await guestGet(`/e/${event.slug}/missoes/${missionId}`, c)).text();
     expect(results).toContain("Vencedora");
     expect(results).toContain("2 votos");
+    expect(results).toContain("winner-hero");
+    expect(results).toContain("WINNER");
+    await setMissionPhase(event.db_name, secondMission.id, "encerrada");
+    expect(await (await guestGet(`/e/${event.slug}/missoes/${secondMission.id}`, c)).text()).toContain("sem votos");
   });
 });
 
@@ -1137,6 +1141,13 @@ describe("avisos em direto e app", () => {
     const home = await (await handle(new Request(`${ORIGIN}/e/${opened.slug}`, { headers: { Cookie: guest } }))).text();
     expect(home).toContain("data-live");
     expect(home).toContain("data-install-button");
+  });
+
+  test("mostra a instalação logo na primeira página e a versão instalada", async () => {
+    const event = await createClient({ ...couple, name: "Evento instalar" });
+    expect(await (await get(`/e/${event.slug}`, false)).text()).toContain("data-install-button");
+    const health = await (await get("/healthz", false)).json() as { version: string };
+    expect(health.version).toBeTruthy();
   });
 
   test("publica o manifesto, os ícones e o service worker", async () => {

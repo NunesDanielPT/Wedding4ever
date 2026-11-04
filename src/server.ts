@@ -49,6 +49,7 @@ import { listEmailLog, queueEventEmails, sendEventEmails } from "./lib/event-ema
 import { archiveEvent } from "./lib/stats";
 import * as admin from "./views/admin";
 
+const VERSION = "2026-11-04-winner-hero";
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
@@ -355,7 +356,7 @@ async function route(req: Request): Promise<Response> {
 
   if (path === "/healthz") {
     await central`SELECT 1`;
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, version: VERSION });
   }
 
   const staticFile = STATIC_FILES[path];

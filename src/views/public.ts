@@ -7,6 +7,7 @@ import { html, Html } from "../lib/html";
 import type { Guest } from "../lib/event-auth";
 import { MAX_CAPTION_LENGTH, type MissionDetail, type Photo } from "../lib/photos";
 import { page } from "./layout";
+import { confetti } from "./winners";
 
 const MESSAGES: Record<EventStatus, string> = {
   rascunho: "As missões abrem no dia do evento. Guarda este link.",
@@ -74,7 +75,7 @@ export function joinPage(event: EventRecord, values: JoinValues = {}, error?: st
       ${heading(event)}
       ${event.status === "arquivado"
         ? html`<p>${MESSAGES.arquivado}</p>`
-        : html`<p>Indica o teu nome e e-mail para entrar.</p>
+        : html`${installCard}<p>Indica o teu nome e e-mail para entrar.</p>
           <form method="post" action="/e/${event.slug}/entrar" class="stack guest-form">
             ${error && html`<p class="error" role="alert">${error}</p>`}
             <label>Nome completo<input name="name" autocomplete="name" maxlength="80" required value="${values.name ?? ""}"></label>
@@ -82,6 +83,7 @@ export function joinPage(event: EventRecord, values: JoinValues = {}, error?: st
             <button class="primary">Entrar</button>
           </form>`}
     </main>
+    <script src="${asset("install.js")}" defer></script>
   `);
 }
 
@@ -178,6 +180,23 @@ function gallery(event: EventRecord, guest: Guest, mission: MissionDetail, photo
   `;
 }
 
+/** A vencedora abre logo em destaque, sem depender de avisos nem de mais cliques. */
+function winnerHero(event: EventRecord, photos: Photo[]): Html {
+  const ready = photos.filter((photo) => photo.preview_status === "ready");
+  const top = Math.max(0, ...ready.map((photo) => photo.votes));
+  if (top === 0) return html`<p>A votação terminou sem votos, por isso esta missão não tem vencedor.</p>`;
+  return html`
+    <section class="live-winner winner-hero" aria-label="Vencedor da missão">
+      ${confetti}
+      <p class="winner-word">WINNER</p>
+      ${ready.filter((photo) => photo.votes === top).map((photo) => html`
+        <figure>
+          <img src="/e/${event.slug}/fotos/${photo.id}/preview" alt="${photo.caption || `Fotografia de ${photo.guest_name}`}">
+          <figcaption><strong>${photo.guest_name}</strong><span>${photo.votes === 1 ? "1 voto" : `${photo.votes} votos`}</span>${photo.caption && html`<em>${photo.caption}</em>`}</figcaption>
+        </figure>`)}
+    </section>`;
+}
+
 export function missionPage(
   event: EventRecord,
   guest: Guest,
@@ -216,7 +235,8 @@ export function missionPage(
         ${gallery(event, guest, mission, photos, vote)}`}
 
       ${mission.phase === "encerrada" && html`
-        <p>A votação terminou.</p>
+        ${winnerHero(event, photos)}
+        <h2>Todas as fotografias</h2>
         ${gallery(event, guest, mission, photos)}`}
     </main>
     ${liveScripts(event)}

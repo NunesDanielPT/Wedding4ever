@@ -3,7 +3,7 @@ import { html } from "../lib/html";
 import type { MissionWinners } from "../lib/missions";
 import { page } from "./layout";
 
-const confetti = html`<div class="confetti" aria-hidden="true">${Array.from({ length: 28 }, () => html`<span></span>`)}</div>`;
+export const confetti = html`<div class="confetti" aria-hidden="true">${Array.from({ length: 28 }, () => html`<span></span>`)}</div>`;
 
 export function winnersPage(event: EventRecord, missions: MissionWinners[], photoBase: string, back: string): string {
   return page("Vencedores", html`
