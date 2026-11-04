@@ -3,6 +3,8 @@ import { themeCss } from "../lib/design";
 import { mediaPath } from "../lib/event-assets";
 import { currentGuest, guestCookie, GuestLimitError, joinGuest, type Guest } from "../lib/event-auth";
 import { getWinners } from "../lib/missions";
+import { retentionOf } from "../lib/retention";
+import { getSettings } from "../lib/settings";
 import {
   canViewPhoto,
   countGuestPhotos,
@@ -20,7 +22,7 @@ import {
   votePhoto,
   type MissionDetail,
 } from "../lib/photos";
-import { guestHomePage, joinPage, missionPage } from "../views/public";
+import { eventExpiredPage, guestHomePage, joinPage, missionPage } from "../views/public";
 import { winnersPage } from "../views/winners";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./http";
 
@@ -130,6 +132,12 @@ export async function handleEvent(req: Request, path: string): Promise<Response 
   const event = await getEventBySlug(match[1]!);
   if (!event) return notFound();
   const action = match[2] ?? "";
+
+  const isAsset = action === "tema.css" || action.startsWith("media/");
+  if (!isAsset && !action.startsWith("noivos")) {
+    const { retentionDays } = await getSettings();
+    if (retentionOf(event.event_date, retentionDays).expired) return htmlResponse(eventExpiredPage(event), 410);
+  }
 
   if (!action && req.method === "GET") return guestHome(req, event);
   if (action === "entrar" && req.method === "POST") return handleJoin(req, event);

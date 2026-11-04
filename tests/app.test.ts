@@ -1003,3 +1003,119 @@ describe("ficheiros estáticos", () => {
     expect(body).toMatch(/\/static\/site\.css\?v=[0-9a-f]{10}/);
   });
 });
+
+const { retentionOf } = await import("../src/lib/retention");
+
+describe("prazo dos eventos", () => {
+  const iso = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+
+  test("conta os dias em hora de Portugal", () => {
+    const now = new Date("2026-11-04T12:00:00Z");
+    expect(retentionOf("2026-11-04", 30, now)).toEqual({ deleteDate: "2026-12-04", daysLeft: 30, expired: false });
+    expect(retentionOf("2026-10-05", 30, now)).toMatchObject({ daysLeft: 0, expired: false });
+    expect(retentionOf("2026-10-04", 30, now)).toMatchObject({ daysLeft: -1, expired: true });
+    expect(retentionOf("2026-10-05", 30, new Date("2026-11-04T23:59:00Z")).expired).toBe(false);
+  });
+
+  test("avisa o superadmin, bloqueia clientes e convidados e nunca apaga sozinho", async () => {
+    const event = await createClient({ ...couple, name: "Evento Expirado", eventDate: iso(-40), coupleEmail: "expirado@exemplo.pt" });
+    const code = (await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text()).match(/<strong>([A-Z2-9]{10})</)![1]!;
+    expect(await (await get("/admin")).text()).toContain("prazo terminou há");
+    expect(await (await get(`/admin/clientes/${event.id}`)).text()).toContain("Clientes e organizadores já não têm acesso");
+
+    const session = cookieOf(await post("/entrar", { email: "expirado@exemplo.pt", code }, { Cookie: "" }));
+    const client = (path: string) => handle(new Request(`${ORIGIN}${path}`, { headers: { Cookie: session } }));
+    expect((await client(`/cliente/eventos/${event.id}`)).status).toBe(410);
+    expect((await client(`/cliente/eventos/${event.id}/fotos.zip`)).status).toBe(410);
+    expect((await get(`/e/${event.slug}`, false)).status).toBe(410);
+    expect((await get(`/cliente/eventos/${event.id}/fotos.zip`)).status).toBe(200);
+    expect(await events.getEventById(event.id)).toBeDefined();
+  });
+
+  test("ao apagar, mantém só os totais nas estatísticas", async () => {
+    const event = await createClient({ ...couple, name: "Evento Arquivado" });
+    await post(`/e/${event.slug}/entrar`, { name: "Pessoa Arquivo", email: "arquivo@exemplo.pt" }, { Cookie: "" });
+    expect((await post(`/admin/clientes/${event.id}/apagar`, { confirm: event.slug })).status).toBe(303);
+    const { getStats } = await import("../src/lib/stats");
+    const stats = await getStats({ year: new Date().getFullYear(), eventId: event.id });
+    expect(stats.totals.guests).toBe(1);
+    expect(stats.events[0]!.deleted).toBe(true);
+    const [archived] = await central`SELECT activity::text AS activity FROM archived_events WHERE id = ${event.id}::uuid`;
+    expect(archived.activity).not.toContain("arquivo@exemplo.pt");
+  });
+
+  test("o prazo é configurável", async () => {
+    expect((await post("/admin/definicoes/prazo", { retentionDays: "0" })).status).toBe(422);
+    expect((await post("/admin/definicoes/prazo", { retentionDays: "60" })).status).toBe(200);
+    expect(await (await get("/admin/definicoes")).text()).toContain('value="60"');
+    await post("/admin/definicoes/prazo", { retentionDays: "30" });
+  });
+});
+
+describe("e-mails de evento criado", () => {
+  const net = require("node:net");
+  function smtp() {
+    const messages: string[] = [];
+    const server = net.createServer((socket: any) => {
+      let inData = false;
+      let buffer = "";
+      socket.write("220 teste\r\n");
+      socket.on("error", () => {});
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk: string) => {
+        buffer += chunk;
+        let index: number;
+        while ((index = buffer.indexOf("\r\n")) >= 0) {
+          const line = buffer.slice(0, index);
+          buffer = buffer.slice(index + 2);
+          messages.push(line);
+          if (inData) { if (line === ".") { inData = false; socket.write("250 ok\r\n"); } }
+          else if (line.startsWith("EHLO")) socket.write("250-teste\r\n250-STARTTLS\r\n250 AUTH PLAIN\r\n");
+          else if (line === "DATA") { inData = true; socket.write("354 envia\r\n"); }
+          else if (line === "QUIT") { socket.write("221 adeus\r\n"); socket.end(); }
+          else socket.write("250 ok\r\n");
+        }
+      });
+    });
+    return new Promise<{ server: any; port: number; messages: string[] }>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port, messages }));
+    });
+  }
+
+  test("sem serviço ativo, regista e cria o evento na mesma", async () => {
+    const event = await createClient({ ...couple, name: "Sem e-mail" });
+    const { sendEventEmails, listEmailLog } = await import("../src/lib/event-emails");
+    await sendEventEmails(event);
+    const rows = await listEmailLog(event.id);
+    expect(rows.some((row) => row.audience === "cliente" && row.status === "nao_enviado")).toBe(true);
+    expect(rows.some((row) => row.audience === "superadmin")).toBe(true);
+    expect(await (await get(`/admin/clientes/${event.id}`)).text()).toContain("Não enviado");
+  });
+
+  test("edita o modelo, preenche os dados e regista falhas por destinatário", async () => {
+    const { renderTemplate, DEFAULT_TEMPLATES } = await import("../src/lib/email-templates");
+    expect(renderTemplate("Olá {{evento}} {{desconhecido}}", { evento: "Festa" })).toBe("Olá Festa {{desconhecido}}");
+    expect(DEFAULT_TEMPLATES.cliente.body).toContain("{{dias}} dias após o evento");
+    expect(await (await get("/admin/emails")).text()).toContain("Pré-visualizar");
+    expect((await post("/admin/emails/cliente/guardar", { subject: "", body: "x" })).status).toBe(422);
+    expect((await post("/admin/emails/cliente/guardar", { subject: "Bem-vindos a {{evento}}", body: "Código {{codigo}} até {{data_limite}}" })).status).toBe(200);
+
+    const { sendEventEmails, listEmailLog } = await import("../src/lib/event-emails");
+    const { saveEmailSettings } = await import("../src/lib/settings");
+    const mail = await smtp();
+    await saveEmailSettings({
+      enabled: true, host: "127.0.0.1", port: mail.port, security: "starttls", username: "", password: "",
+      fromName: "Teste", fromAddress: "ola@exemplo.pt",
+    });
+    const event = await createClient({ ...couple, name: "Com e-mail", coupleEmail: "cliente-email@exemplo.pt" });
+    await sendEventEmails((await events.getEventById(event.id))!);
+    const rows = await listEmailLog(event.id);
+    mail.server.close();
+    expect(rows.find((row) => row.audience === "cliente")!.subject).toBe("Bem-vindos a Com e-mail");
+    expect(rows.every((row) => row.status === "falhou")).toBe(true);
+    expect((await events.getEventById(event.id))!.has_couple_code).toBe(true);
+
+    await saveEmailSettings({ enabled: false, host: "", port: 587, security: "starttls", username: "", password: "", fromName: "", fromAddress: "" });
+    await post("/admin/emails/cliente/repor", {});
+  });
+});

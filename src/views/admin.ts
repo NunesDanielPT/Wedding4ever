@@ -6,6 +6,9 @@ import type { Design } from "../lib/design";
 import { eventUrl } from "../lib/event-assets";
 import { formatDate, initials } from "../lib/format";
 import { html, Html } from "../lib/html";
+import { AUDIENCE_LABELS } from "../lib/email-templates";
+import { retentionOf } from "../lib/retention";
+import type { EmailLogRow } from "../lib/event-emails";
 import type { SiteItem } from "../lib/site";
 import { MAX_TITLE_LENGTH, MISSION_PHASES, PHASE_LABELS, type AdminMission } from "../lib/missions";
 import { EVENT_TYPE_IDS, EVENT_TYPES } from "../lib/event-types";
@@ -30,6 +33,7 @@ export function shell(title: string, content: Html, stylesheet?: string): string
         <a href="/admin">Eventos</a>
         <a href="/admin/organizadores">Organizadores</a>
         <a href="/admin/estatisticas">Estatísticas</a>
+        <a href="/admin/emails">E-mails</a>
         <a href="/admin/site">Site</a>
         <a href="/admin/mensagens">Mensagens</a>
         <a href="/admin/definicoes">Definições</a>
@@ -54,12 +58,20 @@ export function loginPage(error?: string): string {
   `);
 }
 
-export function dashboardPage(events: EventRecord[], unread = 0): string {
+function retentionLabel(event: EventRecord, days: number): string {
+  const { daysLeft, expired } = retentionOf(event.event_date, days);
+  if (expired) return `Apagar: prazo terminou há ${-daysLeft} ${daysLeft === -1 ? "dia" : "dias"}`;
+  return daysLeft === 0 ? "Último dia antes de apagar" : `Faltam ${daysLeft} ${daysLeft === 1 ? "dia" : "dias"} para apagar`;
+}
+
+export function dashboardPage(events: EventRecord[], unread = 0, retentionDays = 30): string {
+  const expired = events.filter((event) => retentionOf(event.event_date, retentionDays).expired).length;
   return shell("Eventos", html`
     <div class="page-head">
       <h1>Eventos</h1>
       <a class="primary" href="/admin/clientes/novo">Criar evento</a>
     </div>
+    ${expired > 0 && html`<p class="error" role="status">${expired === 1 ? "1 evento já passou do prazo e está à espera de ser apagado." : `${expired} eventos já passaram do prazo e estão à espera de ser apagados.`} Só tu os podes apagar, na página de cada evento.</p>`}
     ${unread > 0 && html`<p class="notice"><a href="/admin/mensagens">${unread === 1 ? "Tens 1 mensagem por ler." : `Tens ${unread} mensagens por ler.`}</a></p>`}
     ${events.length === 0
       ? html`<div class="empty"><p>Ainda não tens eventos. Cria o primeiro para gerar o link, o QR Code e a base de dados.</p></div>`
@@ -69,7 +81,8 @@ export function dashboardPage(events: EventRecord[], unread = 0): string {
               <a href="/admin/clientes/${event.id}">
                 <span class="monogram" aria-hidden="true">${initials(event.name)}</span>
                 <span class="client-name">${event.name}</span>
-                <span class="client-date">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}</span>
+                <span class="client-date">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}<br>
+                  <span class="${retentionOf(event.event_date, retentionDays).expired ? "retention-late" : ""}">${retentionLabel(event, retentionDays)}</span></span>
                 <span class="status status-${event.status}">${STATUS_LABELS[event.status]}</span>
               </a>
             </li>`)}
@@ -148,8 +161,11 @@ export function eventPage(
   packs: SiteItem[],
   error?: string,
   coupleCode?: string,
+  retentionDays = 30,
+  emails: EmailLogRow[] = [],
 ): string {
   const url = eventUrl(event);
+  const retention = retentionOf(event.event_date, retentionDays);
   return shell(event.name, html`
     <a class="back" href="/admin">Voltar aos eventos</a>
     ${error && html`<p class="error" role="alert">${error}</p>`}
@@ -174,6 +190,13 @@ export function eventPage(
           <h2>Link dos convidados</h2>
           <input class="copy-field" readonly value="${url}" aria-label="Link dos convidados">
           <a href="${url}" target="_blank" rel="noopener">Abrir como convidado</a>
+        </section>
+
+        <section>
+          <h2>Prazo do evento</h2>
+          ${retention.expired
+            ? html`<p class="error" role="status">O prazo terminou em ${formatDate(retention.deleteDate)}, há ${-retention.daysLeft} ${retention.daysLeft === -1 ? "dia" : "dias"}. Clientes e organizadores já não têm acesso. Quando quiseres, apaga o evento no fim desta página.</p>`
+            : html`<p>${retentionLabel(event, retentionDays)}. Disponível até ${formatDate(retention.deleteDate)}. O evento nunca é apagado sozinho.</p>`}
         </section>
 
         <section>
@@ -253,12 +276,28 @@ export function eventPage(
       </div>
     </div>
 
+    <section class="guests-section">
+      <h2>E-mails do evento</h2>
+      ${emails.length === 0
+        ? html`<p>Ainda não há registos de e-mails.</p>`
+        : html`<div class="table-scroll"><table class="stat-table email-log">
+            <thead><tr><th scope="col">Para</th><th scope="col">Destino</th><th scope="col">Estado</th><th scope="col">Detalhe</th></tr></thead>
+            <tbody>${emails.map((row) => html`<tr><td>${AUDIENCE_LABELS[row.audience]}</td><td>${row.recipient}</td><td>${EMAIL_STATUS[row.status]}</td><td>${row.error ?? ""}</td></tr>`)}</tbody>
+          </table></div>`}
+      <form method="post" action="/admin/clientes/${event.id}/emails/enviar" class="email-send">
+        <button>Enviar e-mails do evento</button>
+        <p class="hint">Se o serviço de e-mail estiver ativo, é criado um novo código de acesso do cliente, que substitui o anterior.</p>
+      </form>
+    </section>
+
     ${stats && html`<section class="guests-section">
       <h2>Convidados registados</h2>
       ${guestTable(guests)}
     </section>`}
   `);
 }
+
+const EMAIL_STATUS: Record<EmailLogRow["status"], string> = { enviado: "Enviado", falhou: "Falhou", nao_enviado: "Não enviado" };
 
 function colorField(label: string, name: string, value: string): Html {
   return html`<label>${label}<input type="color" name="${name}" value="${value}"></label>`;
@@ -431,6 +470,15 @@ export function settingsPage(
       </section>
 
       <section>
+        <h2>Prazo dos eventos</h2>
+        <p>Número de dias após o evento em que clientes e organizadores continuam a ter acesso. O sistema avisa-te, mas só tu apagas.</p>
+        <form method="post" action="/admin/definicoes/prazo" class="inline-form narrow-form">
+          <input type="number" name="retentionDays" min="1" max="365" value="${settings.retentionDays}" required aria-label="Dias de acesso após o evento">
+          <button>Guardar prazo</button>
+        </form>
+      </section>
+
+      <section>
         <h2>Fotografias por pessoa</h2>
         <p>Limite predefinido em cada missão para os novos clientes. Podes alterá-lo em cada cliente.</p>
         <form method="post" action="/admin/definicoes/fotos" class="inline-form narrow-form">
@@ -441,7 +489,7 @@ export function settingsPage(
 
       <section>
         <h2>Serviço de e-mail</h2>
-        <p>${email.enabled ? "Ativo." : "Desligado."} Usa os dados SMTP do teu fornecedor. A plataforma ainda não envia e-mails automáticos; por agora, só o teste abaixo envia.</p>
+        <p>${email.enabled ? "Ativo." : "Desligado."} Usa os dados SMTP do teu fornecedor. Quando estiver ativo, a plataforma envia os e-mails de evento criado. Os textos editam-se em E-mails.</p>
         <form method="post" action="/admin/definicoes/email" class="stack">
           <label class="check"><input type="checkbox" name="enabled" ${email.enabled ? new Html("checked") : ""}> Ativar o serviço de e-mail</label>
           <div class="pair">

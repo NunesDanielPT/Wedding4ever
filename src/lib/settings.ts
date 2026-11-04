@@ -16,6 +16,7 @@ export interface EmailSettings {
 }
 
 export interface PlatformSettings {
+  retentionDays: number;
   brandName: string;
   defaultPhotoLimit: number;
   email: EmailSettings;
@@ -25,6 +26,7 @@ export const MIN_PHOTO_LIMIT = 1;
 export const MAX_PHOTO_LIMIT = 50;
 
 const DEFAULTS: PlatformSettings = {
+  retentionDays: 30,
   brandName: DEFAULT_BRAND,
   defaultPhotoLimit: 3,
   email: {
@@ -66,6 +68,10 @@ export async function saveBrandName(name: string): Promise<void> {
 
 export async function loadBrand(): Promise<void> {
   setBrand((await getSettings()).brandName);
+}
+
+export async function saveRetentionDays(days: number): Promise<void> {
+  await saveSettings({ ...(await getSettings()), retentionDays: days });
 }
 
 export async function saveDefaultPhotoLimit(limit: number): Promise<void> {

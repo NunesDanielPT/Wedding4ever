@@ -84,7 +84,7 @@ button, .primary {
 
 .client-list { border-top: 1px solid var(--line); list-style: none; margin: 0; padding: 0; }
 .client-list li { border-bottom: 1px solid var(--line); }
-.client-list a { align-items: center; color: inherit; display: grid; gap: .2rem 1rem; grid-template-columns: 3.2rem minmax(0, 1fr) 11rem 6.5rem; padding: .85rem .25rem; text-decoration: none; }
+.client-list a { align-items: center; color: inherit; display: grid; gap: .2rem 1rem; grid-template-columns: 3.2rem minmax(0, 1fr) 15rem 6.5rem; padding: .85rem .25rem; text-decoration: none; }
 .client-list a:hover { background: var(--card); }
 .client-name { color: var(--navy); font-family: var(--serif); font-size: 1.25rem; overflow-wrap: anywhere; }
 .client-date { color: var(--ink-soft); font-size: .92rem; }
@@ -200,7 +200,7 @@ textarea { background: var(--card); border: 1px solid #a99f8c; border-radius: 3p
 .login-title { font-size: 1.7rem; margin-bottom: 1rem; }
 .action { border: 1px solid var(--navy); border-radius: 3px; color: var(--navy); display: inline-block; min-height: 44px; padding: .55rem 1.1rem; text-decoration: none; }
 .link-danger { color: var(--danger); }
-.event-list a { grid-template-columns: minmax(0, 1fr) 11rem 6.5rem; }
+.event-list a { grid-template-columns: minmax(0, 1fr) 18rem 6.5rem; }
 .client-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 1.5rem 0; max-width: 560px; }
 .client-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: 2rem; }
 .client-section { margin-bottom: 2.5rem; }
@@ -293,6 +293,15 @@ input[type="file"] { min-height: 0; }
 }
 
 
+.retention-late { color: var(--danger); font-weight: 600; }
+.email-send { margin-top: .9rem; }
+.email-send .hint { margin-top: .4rem; }
+.email-log td, .email-log th { text-align: left; white-space: normal; }
+.variables { margin-bottom: 1.5rem; max-width: 680px; }
+.variables summary { color: var(--navy); cursor: pointer; margin-bottom: .5rem; }
+.variables td, .variables th { text-align: left; }
+.email-test { margin: 1rem 0 .4rem; }
+.settings section textarea { font-size: .95rem; line-height: 1.5; }
 .type-label { color: var(--ink-soft); font-size: .9rem; margin: 0 0 .25rem; }
 .card-monogram { letter-spacing: .04em; }
 .themed h1, .themed h2, .themed .guest-title, .themed .card-date { font-family: var(--t-font); }

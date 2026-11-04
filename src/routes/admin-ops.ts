@@ -1,7 +1,11 @@
 import { MIN_ADMIN_PASSWORD } from "../lib/auth";
+import { DEFAULT_TEMPLATES, getTemplates, renderTemplate, saveTemplate, type Audience } from "../lib/email-templates";
+import { sampleVariables } from "../lib/event-emails";
+import { sendMail } from "../lib/mail";
+import { getSettings } from "../lib/settings";
 import { addOrganizer, listOrganizers, removeOrganizer, setOrganizerActive, setOrganizerPassword } from "../lib/organizers";
 import { getStats } from "../lib/stats";
-import { organizersPage, statsPage } from "../views/admin-ops";
+import { emailsPage, organizersPage, statsPage, type EmailsNotice } from "../views/admin-ops";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./http";
 
 async function render(error?: string, status = 200): Promise<Response> {
@@ -49,6 +53,44 @@ async function handleStats(req: Request): Promise<Response> {
   return htmlResponse(statsPage(stats));
 }
 
+async function renderEmails(notice?: EmailsNotice, status = 200): Promise<Response> {
+  return htmlResponse(emailsPage(await getTemplates(), sampleVariables(), notice), status);
+}
+
+async function handleEmails(req: Request, path: string): Promise<Response> {
+  if (path === "/admin/emails") return req.method === "GET" ? renderEmails() : notFound();
+  const match = path.match(/^\/admin\/emails\/(cliente|organizador|superadmin)\/(guardar|repor|testar)$/);
+  if (!match || req.method !== "POST") return notFound();
+  const audience = match[1] as Audience;
+  const form = await req.formData();
+  if (match[2] === "repor") {
+    await saveTemplate(audience, DEFAULT_TEMPLATES[audience]);
+    return renderEmails({ success: "Texto padrão reposto." });
+  }
+  if (match[2] === "guardar") {
+    const subject = field(form, "subject");
+    const body = String(form.get("body") ?? "").trim();
+    if (!subject || subject.length > 200) return renderEmails({ error: "O assunto tem de ter entre 1 e 200 caracteres." }, 422);
+    if (!body || body.length > 20_000) return renderEmails({ error: "A mensagem tem de ter entre 1 e 20 000 caracteres." }, 422);
+    await saveTemplate(audience, { subject, body });
+    return renderEmails({ success: "Modelo guardado." });
+  }
+  const to = field(form, "to").toLowerCase();
+  const { email } = await getSettings();
+  if (!isEmail(to)) return renderEmails({ error: "Indica um e-mail válido para o teste." }, 422);
+  if (!email.host || !email.fromAddress) return renderEmails({ error: "Configura primeiro o serviço de e-mail em Definições." }, 422);
+  const template = (await getTemplates())[audience];
+  const variables = sampleVariables();
+  try {
+    await sendMail(email, { to, subject: renderTemplate(template.subject, variables), text: renderTemplate(template.body, variables) });
+    return renderEmails({ success: `E-mail de teste enviado para ${to}.` });
+  } catch (cause) {
+    return renderEmails({ error: `O teste falhou: ${cause instanceof Error ? cause.message : String(cause)}` }, 502);
+  }
+}
+
 export function handleAdminOps(req: Request, path: string): Promise<Response> {
-  return path === "/admin/estatisticas" ? handleStats(req) : handleOrganizers(req, path);
+  if (path === "/admin/estatisticas") return handleStats(req);
+  if (path.startsWith("/admin/emails")) return handleEmails(req, path);
+  return handleOrganizers(req, path);
 }

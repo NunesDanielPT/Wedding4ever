@@ -1,3 +1,4 @@
+import { AUDIENCE_LABELS, AUDIENCES, EMAIL_VARIABLES, renderTemplate, type Audience, type EmailTemplate } from "../lib/email-templates";
 import { EVENT_TYPES } from "../lib/event-types";
 import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
@@ -144,7 +145,7 @@ export function statsPage(stats: Stats): string {
             <thead><tr><th scope="col">Evento</th><th scope="col">Data</th><th scope="col">Organizador</th><th scope="col">Pack</th><th scope="col">Registos</th><th scope="col">Fotografias</th><th scope="col">Votos</th><th scope="col">Espaço</th></tr></thead>
             <tbody>${stats.events.map((row) => html`
               <tr>
-                <td><a href="/admin/clientes/${row.id}">${row.name}</a></td>
+                <td>${row.deleted ? `${row.name} (apagado)` : html`<a href="/admin/clientes/${row.id}">${row.name}</a>`}</td>
                 <td>${formatDate(row.date)}</td>
                 <td>${row.organizer || "Administração"}</td>
                 <td>${row.pack || "Sem pack"}</td>
@@ -155,5 +156,55 @@ export function statsPage(stats: Stats): string {
               </tr>`)}</tbody>
           </table></div>`}
     </section>
+  `);
+}
+
+export interface EmailsNotice {
+  success?: string;
+  error?: string;
+}
+
+const AUDIENCE_HINTS: Record<Audience, string> = {
+  cliente: "Boas-vindas e tutorial. Vai para o e-mail do cliente quando o evento é criado.",
+  organizador: "Vai para o organizador do evento, quando existir.",
+  superadmin: "Vai para todos os administradores.",
+};
+
+export function emailsPage(templates: Record<Audience, EmailTemplate>, sample: Record<string, string>, notice: EmailsNotice = {}): string {
+  return shell("E-mails", html`
+    <h1>E-mails</h1>
+    <p class="lead">Estes textos são enviados quando um evento é criado, depois de ativares o serviço em Definições. As palavras entre chavetas são preenchidas automaticamente.</p>
+    ${notice.error && html`<p class="error" role="alert">${notice.error}</p>`}
+    ${notice.success && html`<p class="notice" role="status">${notice.success}</p>`}
+
+    <details class="variables">
+      <summary>Ver os dados automáticos</summary>
+      <table class="stat-table">
+        <tbody>${Object.entries(EMAIL_VARIABLES).map(([name, label]) => html`<tr><td><code>{{${name}}}</code></td><td>${label}</td></tr>`)}</tbody>
+      </table>
+    </details>
+
+    <div class="settings">
+      ${AUDIENCES.map((audience) => html`
+        <section>
+          <h2>${AUDIENCE_LABELS[audience]}</h2>
+          <p>${AUDIENCE_HINTS[audience]}</p>
+          <form method="post" action="/admin/emails/${audience}/guardar" class="stack">
+            <label>Assunto<input name="subject" maxlength="200" required value="${templates[audience].subject}"></label>
+            <label>Mensagem<textarea name="body" rows="16" required>${templates[audience].body}</textarea></label>
+            <button class="primary">Guardar modelo</button>
+          </form>
+          <details class="site-add">
+            <summary>Pré-visualizar com dados de exemplo</summary>
+            <p><strong>${renderTemplate(templates[audience].subject, sample)}</strong></p>
+            <p class="message-body">${renderTemplate(templates[audience].body, sample)}</p>
+          </details>
+          <form method="post" action="/admin/emails/${audience}/testar" class="inline-form email-test">
+            <input type="email" name="to" required placeholder="E-mail para o teste" aria-label="E-mail para o teste">
+            <button>Enviar teste</button>
+          </form>
+          <form method="post" action="/admin/emails/${audience}/repor"><button class="link-button">Repor texto padrão</button></form>
+        </section>`)}
+    </div>
   `);
 }

@@ -29,12 +29,12 @@ export function clientCookie(token: string | null): string {
 }
 
 /** Gera um novo código e termina as sessões abertas desse cliente. */
-export async function generateClientCode(event: EventRecord): Promise<string> {
+export async function generateClientCode(event: EventRecord, options: { keepSessions?: boolean } = {}): Promise<string> {
   let code = "";
   for (let i = 0; i < 10; i++) code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
   const hash = await Bun.password.hash(code);
   await central`UPDATE events SET couple_code_hash = ${hash}, updated_at = now() WHERE id = ${event.id}::uuid`;
-  await central`DELETE FROM client_sessions WHERE email = ${event.couple_email}`;
+  if (!options.keepSessions) await central`DELETE FROM client_sessions WHERE email = ${event.couple_email}`;
   return code;
 }
 

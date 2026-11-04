@@ -1,5 +1,5 @@
 import { central } from "../db/central";
-import { eventDb } from "../db/events";
+import { eventDb, type EventRecord } from "../db/events";
 import type { EventType } from "./event-types";
 
 const TIME_ZONE = "Europe/Lisbon";
@@ -33,6 +33,7 @@ export interface EventRow {
   votes: number;
   bytes: number;
   unavailable: boolean;
+  deleted: boolean;
 }
 
 export interface Stats {
@@ -58,6 +59,7 @@ interface CentralEvent {
   pack_name: string;
   organizer_id: string | null;
   organizer_name: string | null;
+  archived?: Activity[];
 }
 
 interface Activity {
@@ -81,6 +83,24 @@ async function eventActivity(dbName: string): Promise<Activity[]> {
   `;
 }
 
+/** Guarda só os totais antes de apagar um evento, para as estatísticas não perderem história. */
+export async function archiveEvent(event: EventRecord): Promise<void> {
+  const activity = await eventActivity(event.db_name).catch((cause) => {
+    console.error(`Não foi possível ler os totais de ${event.id}`, cause);
+    return [] as Activity[];
+  });
+  const organizers: { name: string }[] = event.organizer_id
+    ? await central`SELECT name FROM organizers WHERE id = ${event.organizer_id}::uuid`
+    : [];
+  const [row]: { created_at: Date }[] = await central`SELECT created_at FROM events WHERE id = ${event.id}::uuid`;
+  await central`
+    INSERT INTO archived_events (id, name, event_type, event_date, created_at, pack_name, organizer_id, organizer_name, activity)
+    VALUES (${event.id}::uuid, ${event.name}, ${event.event_type}, ${event.event_date}::date, ${row!.created_at},
+            ${event.pack_name}, ${event.organizer_id}::uuid, ${organizers[0]?.name ?? null}, ${JSON.stringify(activity)}::text::jsonb)
+    ON CONFLICT (id) DO NOTHING
+  `;
+}
+
 function ym(date: Date | string): string {
   const value = new Date(date);
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE, year: "numeric", month: "2-digit" }).formatToParts(value);
@@ -95,6 +115,12 @@ export async function getStats(filter: StatsFilter): Promise<Stats> {
     FROM events e LEFT JOIN organizers o ON o.id = e.organizer_id
     ORDER BY e.event_date DESC, e.created_at DESC
   `;
+  const archived: CentralEvent[] = await central`
+    SELECT id, name, event_type, event_date::text AS event_date, created_at, '' AS db_name, pack_name,
+           organizer_id, organizer_name, activity AS archived
+    FROM archived_events ORDER BY event_date DESC
+  `;
+  all.push(...archived);
   const organizers: { id: string; name: string }[] = await central`SELECT id, name FROM organizers ORDER BY name`;
   const selected = all.filter(
     (event) =>
@@ -103,9 +129,13 @@ export async function getStats(filter: StatsFilter): Promise<Stats> {
   );
 
   const activity = new Map<string, Activity[] | null>();
-  for (let i = 0; i < selected.length; i += BATCH) {
+  const live = selected.filter((event) => !event.archived);
+  for (const event of selected) {
+    if (event.archived) activity.set(event.id, event.archived);
+  }
+  for (let i = 0; i < live.length; i += BATCH) {
     await Promise.all(
-      selected.slice(i, i + BATCH).map(async (event) => {
+      live.slice(i, i + BATCH).map(async (event) => {
         activity.set(event.id, await eventActivity(event.db_name).catch(() => null));
       }),
     );
@@ -135,7 +165,7 @@ export async function getStats(filter: StatsFilter): Promise<Stats> {
     const row: EventRow = {
       id: event.id, name: event.name, type: event.event_type, date: event.event_date,
       organizer: event.organizer_name ?? "", pack: event.pack_name,
-      guests: 0, photos: 0, votes: 0, bytes: 0, unavailable: false,
+      guests: 0, photos: 0, votes: 0, bytes: 0, unavailable: false, deleted: Boolean(event.archived),
     };
     const rows = activity.get(event.id);
     if (!rows) {

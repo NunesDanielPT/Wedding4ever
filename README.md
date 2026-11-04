@@ -24,9 +24,11 @@ Já disponível:
 - Tipos de evento com missões e sugestões próprias
 - Contas de organizadores geridas em `/admin/organizadores`
 - Estatísticas em `/admin/estatisticas`
+- Prazo por evento, com contagem de dias, bloqueio do acesso e eliminação manual
+- Modelos de e-mail em `/admin/emails`
 - Migrações automáticas em todas as bases
 
-Ainda por fazer: ranking, moderação, e-mails automáticos e exportação em ZIP.
+Ainda por fazer: ranking, moderação e exportação em ZIP.
 
 ## Tecnologia
 

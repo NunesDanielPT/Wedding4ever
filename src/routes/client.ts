@@ -19,8 +19,10 @@ import { getSite } from "../lib/site";
 import { getWinners, listAdminMissions, listAlbum, MISSION_PHASES, setMissionPhase, type MissionPhase } from "../lib/missions";
 import { originalPath, previewPath, schedulePreview, thumbPath } from "../lib/photos";
 import { zipStream } from "../lib/zip";
-import { clientContext, clientEventPage, clientEventsPage, clientGalleryPage, clientLoginPage, clientShell } from "../views/client";
+import { clientContext, clientEventPage, clientEventsPage, clientExpiredPage, clientGalleryPage, clientLoginPage, clientShell } from "../views/client";
 import { designPage, newEventPage } from "../views/admin";
+import { queueEventEmails } from "../lib/event-emails";
+import { retentionOf } from "../lib/retention";
 import { winnersPage } from "../views/winners";
 import { handleDesign } from "./design";
 import { readEventForm } from "./event-form";
@@ -53,7 +55,7 @@ async function eventPage(event: EventRecord, canManage: boolean, status = 200, e
     listGuests(event.db_name),
     listAdminMissions(event.db_name),
   ]);
-  return htmlResponse(clientEventPage(event, stats, guests, missions, error, canManage ? { code } : undefined), status);
+  return htmlResponse(clientEventPage(event, stats, guests, missions, error, canManage ? { code } : undefined, (await getSettings()).retentionDays), status);
 }
 
 async function handleEventArea(req: Request, event: EventRecord, action: string, canManage: boolean): Promise<Response> {
@@ -142,7 +144,7 @@ export async function handleClient(req: Request, path: string): Promise<Response
   const organizer = email ? await findActiveOrganizer(email) : undefined;
   if (path === "/cliente") {
     if (!email) return redirect("/entrar");
-    return htmlResponse(clientEventsPage(await listEventsForClient(email, organizer?.id), Boolean(organizer)));
+    return htmlResponse(clientEventsPage(await listEventsForClient(email, organizer?.id), Boolean(organizer), (await getSettings()).retentionDays));
   }
 
   if (path === "/cliente/eventos/novo") {
@@ -161,6 +163,7 @@ export async function handleClient(req: Request, path: string): Promise<Response
       packName: parsed.packName,
       guestLimit: parsed.guestLimit,
     });
+    queueEventEmails(event);
     return redirect(`/cliente/eventos/${event.id}`);
   }
 
@@ -173,5 +176,8 @@ export async function handleClient(req: Request, path: string): Promise<Response
   if (!isAdmin && !owns && event.couple_email !== email) {
     return req.method === "GET" ? redirect("/entrar") : new Response(null, { status: 401 });
   }
+  const { retentionDays } = await getSettings();
+  const retention = retentionOf(event.event_date, retentionDays);
+  if (retention.expired && !isAdmin) return htmlResponse(clientExpiredPage(event, retention.deleteDate), 410);
   return handleEventArea(req, event, match[2] ?? "", isAdmin || owns);
 }

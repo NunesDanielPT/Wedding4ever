@@ -6,6 +6,7 @@ import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
 import { PHASE_LABELS, type AdminMission, type AlbumPhoto, type MissionPhase } from "../lib/missions";
 import { EVENT_TYPES } from "../lib/event-types";
+import { retentionOf } from "../lib/retention";
 import { type DesignContext, STATUS_LABELS } from "./admin";
 import { guestTable } from "./guests";
 import { page, rings } from "./layout";
@@ -44,7 +45,21 @@ export function clientLoginPage(error?: string): string {
   `);
 }
 
-export function clientEventsPage(events: EventRecord[], canCreate = false): string {
+function availability(event: EventRecord, retentionDays: number): string {
+  const { deleteDate, daysLeft, expired } = retentionOf(event.event_date, retentionDays);
+  if (expired) return "Prazo terminado";
+  return `Disponível até ${formatDate(deleteDate)}, ${daysLeft === 1 ? "falta 1 dia" : `faltam ${daysLeft} dias`}`;
+}
+
+export function clientExpiredPage(event: EventRecord, deleteDate: string): string {
+  return clientShell(event.name, html`
+    <a class="back" href="/cliente">Voltar aos eventos</a>
+    <h1>${event.name}</h1>
+    <div class="empty"><p>O prazo deste evento terminou em ${formatDate(deleteDate)}. As fotografias e os downloads já não estão disponíveis.</p></div>
+  `);
+}
+
+export function clientEventsPage(events: EventRecord[], canCreate = false, retentionDays = 30): string {
   return clientShell("Os meus eventos", html`
     <div class="page-head">
       <h1>Os meus eventos</h1>
@@ -56,7 +71,7 @@ export function clientEventsPage(events: EventRecord[], canCreate = false): stri
           ${events.map((event) => html`
             <li><a href="/cliente/eventos/${event.id}">
               <span class="client-name">${event.name}</span>
-              <span class="client-date">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}</span>
+              <span class="client-date">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}<br>${availability(event, retentionDays)}</span>
               <span class="status status-${event.status}">${STATUS_LABELS[event.status]}</span>
             </a></li>`)}
         </ul>`}
@@ -94,6 +109,7 @@ export function clientEventPage(
   missions: AdminMission[],
   error?: string,
   manage?: { code?: string },
+  retentionDays = 30,
 ): string {
   const base = `/cliente/eventos/${event.id}`;
   return clientShell(event.name, html`
@@ -102,6 +118,8 @@ export function clientEventPage(
     <p class="lead">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}${event.pack_name && `. Pack ${event.pack_name}`}</p>
     ${error && html`<p class="error" role="alert">${error}</p>`}
     ${event.guest_limit !== null && stats.guests >= event.guest_limit && html`<p class="error" role="status">O limite de convidados do pack foi atingido. Novos convidados não conseguem entrar.</p>`}
+
+    <p class="notice" role="status">${availability(event, retentionDays)}. Descarrega as fotografias antes desse dia, porque depois deixam de estar disponíveis.</p>
 
     <dl class="facts client-facts">
       <div><dt>Pessoas registadas</dt><dd>${stats.guests}${event.guest_limit ? ` de ${event.guest_limit}` : ""}</dd></div>

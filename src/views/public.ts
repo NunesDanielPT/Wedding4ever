@@ -187,6 +187,15 @@ export function missionPage(
   `);
 }
 
+export function eventExpiredPage(event: EventRecord): string {
+  return themed(event, event.name, html`
+    <main class="guest">
+      <h1>${event.name}</h1>
+      <p>Este evento terminou e as fotografias já não estão disponíveis. Obrigado por teres participado.</p>
+    </main>
+  `);
+}
+
 export function notFoundPage(): string {
   return page("Página não encontrada", html`
     <main class="guest">

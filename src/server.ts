@@ -36,7 +36,7 @@ import { handleMissions } from "./routes/missions";
 import { listOrganizers } from "./lib/organizers";
 import { generateClientCode } from "./lib/event-auth";
 import { sendMail } from "./lib/mail";
-import { getSettings, parsePhotoLimit, saveBrandName, saveDefaultPhotoLimit, saveEmailSettings, type SmtpSecurity } from "./lib/settings";
+import { getSettings, parsePhotoLimit, saveBrandName, saveDefaultPhotoLimit, saveEmailSettings, saveRetentionDays, type SmtpSecurity } from "./lib/settings";
 import { countUnreadMessages, getSite, type SiteItem } from "./lib/site";
 import { handleSiteAdmin } from "./routes/admin-site";
 import { handleClient } from "./routes/client";
@@ -45,6 +45,8 @@ import { handleEvent } from "./routes/event";
 import { handleSite } from "./routes/site";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./routes/http";
 import { brand } from "./lib/brand";
+import { listEmailLog, queueEventEmails, sendEventEmails } from "./lib/event-emails";
+import { archiveEvent } from "./lib/stats";
 import * as admin from "./views/admin";
 
 const PUBLIC_DIR = join(import.meta.dir, "public");
@@ -79,7 +81,8 @@ async function eventDetail(id: string, error?: string, status = 200, coupleCode?
     console.error(`Base ${event.db_name} indisponível`, cause);
     return [null, []];
   });
-  return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode), status);
+  const [{ retentionDays }, emails] = await Promise.all([getSettings(), listEmailLog(id)]);
+  return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode, retentionDays, emails), status);
 }
 
 
@@ -150,6 +153,13 @@ async function handleSettings(req: Request, path: string): Promise<Response> {
     return settingsPage(req, { success: "Nome da plataforma guardado." });
   }
 
+  if (path === "/admin/definicoes/prazo") {
+    const days = Number(field(form, "retentionDays"));
+    if (!Number.isInteger(days) || days < 1 || days > 365) return settingsPage(req, { error: "Escolhe um prazo entre 1 e 365 dias." }, 422);
+    await saveRetentionDays(days);
+    return settingsPage(req, { success: "Prazo guardado." });
+  }
+
   if (path === "/admin/definicoes/fotos") {
     const limit = parsePhotoLimit(field(form, "photoLimit"));
     if (!limit) return settingsPage(req, { error: "Escolhe um limite de fotografias entre 1 e 50." }, 422);
@@ -214,14 +224,14 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     return redirect("/admin/entrar", { "Set-Cookie": sessionCookie(null) });
   }
   if (path === "/admin/definicoes" || path.startsWith("/admin/definicoes/")) return handleSettings(req, path);
-  if (path === "/admin/estatisticas" || path === "/admin/organizadores" || path.startsWith("/admin/organizadores/")) {
+  if (path === "/admin/estatisticas" || path === "/admin/organizadores" || path.startsWith("/admin/organizadores/") || path === "/admin/emails" || path.startsWith("/admin/emails/")) {
     return handleAdminOps(req, path);
   }
   if (path === "/admin/site" || path.startsWith("/admin/site/") || path === "/admin/mensagens" || path.startsWith("/admin/mensagens/")) {
     return handleSiteAdmin(req, path);
   }
   if (path === "/admin" && req.method === "GET") {
-    return htmlResponse(admin.dashboardPage(await listEvents(), await countUnreadMessages()));
+    return htmlResponse(admin.dashboardPage(await listEvents(), await countUnreadMessages(), (await getSettings()).retentionDays));
   }
   if (path === "/admin/clientes/novo" && req.method === "GET") {
     return htmlResponse(admin.newEventPage((await getSite()).packs, {}, undefined, { action: "/admin/clientes", back: "/admin", organizers: await listOrganizers() }));
@@ -247,6 +257,7 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
         packName: parsed.packName,
         guestLimit: parsed.guestLimit,
       });
+      queueEventEmails(event);
       return redirect(`/admin/clientes/${event.id}`);
     } catch (cause) {
       console.error("Falha ao criar evento", cause);
@@ -295,6 +306,13 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     return redirect(`/admin/clientes/${id}`);
   }
 
+  if (action === "emails/enviar" && req.method === "POST") {
+    const event = await getEventById(id);
+    if (!event) return notFound();
+    await sendEventEmails(event);
+    return redirect(`/admin/clientes/${id}`);
+  }
+
   if (action === "codigo-noivos" && req.method === "POST") {
     const event = await getEventById(id);
     return event ? eventDetail(id, undefined, 200, await generateClientCode(event)) : notFound();
@@ -315,6 +333,7 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     if (field(await req.formData(), "confirm") !== event.slug) {
       return eventDetail(id, "O texto de confirmação não coincide. O cliente não foi apagado.", 422);
     }
+    await archiveEvent(event);
     await deleteEvent(event);
     return redirect("/admin");
   }
