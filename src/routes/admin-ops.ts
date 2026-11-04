@@ -1,5 +1,5 @@
 import { MIN_ADMIN_PASSWORD } from "../lib/auth";
-import { DEFAULT_TEMPLATES, getTemplates, renderTemplate, saveTemplate, type Audience } from "../lib/email-templates";
+import { DEFAULT_TEMPLATES, getTemplates, renderTemplate, saveTemplate, type TemplateKey } from "../lib/email-templates";
 import { sampleVariables } from "../lib/event-emails";
 import { sendMail } from "../lib/mail";
 import { getSettings } from "../lib/settings";
@@ -59,9 +59,9 @@ async function renderEmails(notice?: EmailsNotice, status = 200): Promise<Respon
 
 async function handleEmails(req: Request, path: string): Promise<Response> {
   if (path === "/admin/emails") return req.method === "GET" ? renderEmails() : notFound();
-  const match = path.match(/^\/admin\/emails\/(cliente|organizador|superadmin)\/(guardar|repor|testar)$/);
+  const match = path.match(/^\/admin\/emails\/(cliente|organizador|superadmin|vencedor)\/(guardar|repor|testar)$/);
   if (!match || req.method !== "POST") return notFound();
-  const audience = match[1] as Audience;
+  const audience = match[1] as TemplateKey;
   const form = await req.formData();
   if (match[2] === "repor") {
     await saveTemplate(audience, DEFAULT_TEMPLATES[audience]);

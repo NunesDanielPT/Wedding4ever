@@ -5,6 +5,8 @@ import { currentGuest, guestCookie, GuestLimitError, joinGuest, type Guest } fro
 import { asset } from "../lib/assets";
 import { brand } from "../lib/brand";
 import { getWinners, listAdminMissions } from "../lib/missions";
+import { removeSubscription, saveSubscription } from "../lib/notifications";
+import { getVapidKeys, isAllowedEndpoint } from "../lib/push";
 import { retentionOf } from "../lib/retention";
 import { getSettings } from "../lib/settings";
 import {
@@ -206,6 +208,25 @@ export async function handleEvent(req: Request, path: string): Promise<Response 
       }),
       { headers: { "Content-Type": "application/manifest+json", "Cache-Control": "no-cache" } },
     );
+  }
+
+  if (action === "notificacoes" || action === "notificacoes/chave") {
+    const guest = await currentGuest(req, event);
+    if (!guest) return new Response(null, { status: 401 });
+    if (action === "notificacoes/chave" && req.method === "GET") {
+      return Response.json({ publicKey: (await getVapidKeys()).publicKey });
+    }
+    const data = (await req.json().catch(() => null)) as { endpoint?: unknown; p256dh?: unknown; auth?: unknown } | null;
+    const endpoint = data?.endpoint;
+    if (typeof endpoint !== "string" || endpoint.length > 1000 || !isAllowedEndpoint(endpoint)) return new Response(null, { status: 422 });
+    if (req.method === "DELETE") {
+      await removeSubscription(event, endpoint);
+      return new Response(null, { status: 204 });
+    }
+    if (req.method !== "POST" || typeof data?.p256dh !== "string" || typeof data.auth !== "string") return new Response(null, { status: 422 });
+    if (data.p256dh.length > 200 || data.auth.length > 100) return new Response(null, { status: 422 });
+    await saveSubscription(event, guest.id, { endpoint, p256dh: data.p256dh, auth: data.auth });
+    return new Response(null, { status: 204 });
   }
 
   if (action === "novidades" && req.method === "GET") {

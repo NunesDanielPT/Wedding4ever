@@ -46,10 +46,11 @@ import { handleSite } from "./routes/site";
 import { field, htmlResponse, isEmail, notFound, redirect } from "./routes/http";
 import { brand } from "./lib/brand";
 import { listEmailLog, queueEventEmails, sendEventEmails } from "./lib/event-emails";
+import { queueNotifications } from "./lib/notifications";
 import { archiveEvent } from "./lib/stats";
 import * as admin from "./views/admin";
 
-const VERSION = "2026-11-04-winner-hero";
+const VERSION = "2026-11-04-notificacoes";
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
@@ -57,6 +58,7 @@ const STATIC_FILES: Record<string, string> = {
   "/static/gallery.js": "gallery.js",
   "/static/nav.js": "nav.js",
   "/static/live.js": "live.js",
+  "/static/notifications.js": "notifications.js",
   "/static/install.js": "install.js",
   "/static/icon-192.png": "icon-192.png",
   "/static/icon-512.png": "icon-512.png",
@@ -332,6 +334,7 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     const event = await getEventById(id);
     if (!event) return notFound();
     await applyEventStatus(event, status as EventStatus);
+    queueNotifications(id);
     return redirect(`/admin/clientes/${id}`);
   }
 
@@ -362,7 +365,7 @@ async function route(req: Request): Promise<Response> {
   const staticFile = STATIC_FILES[path];
   if (staticFile) {
     return new Response(Bun.file(join(PUBLIC_DIR, staticFile)), {
-      headers: { "Cache-Control": "public, max-age=3600" },
+      headers: { "Cache-Control": path === "/sw.js" ? "no-cache" : "public, max-age=3600" },
     });
   }
 

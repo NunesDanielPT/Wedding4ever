@@ -38,7 +38,18 @@ function liveScripts(event: EventRecord): Html {
     <div data-live="${base}/novidades" data-base="${base}" hidden></div>
     <script src="${asset("live.js")}" defer></script>
     <script src="${asset("install.js")}" defer></script>
+    <script src="${asset("notifications.js")}" defer></script>
   `;
+}
+
+function notificationsCard(event: EventRecord): Html {
+  return html`
+    <section class="install-card" data-notifications="/e/${event.slug}/notificacoes" hidden>
+      <h2>Recebe os avisos da festa</h2>
+      <p>Sabe quando abrem as missões, a votação e quem ganhou, mesmo com a página fechada.</p>
+      <button class="primary" type="button" data-notify-button>Ativar notificações</button>
+      <p class="notify-message" data-notify-message role="status" hidden></p>
+    </section>`;
 }
 
 const installCard = html`
@@ -93,6 +104,7 @@ export function guestHomePage(event: EventRecord, guest: Guest, missions: Missio
       ${heading(event)}
       <p>Olá, ${guest.full_name}. ${MESSAGES[event.status]}</p>
       ${installCard}
+      ${notificationsCard(event)}
       ${hasWinners && html`<p><a class="primary winners-link" href="/e/${event.slug}/vencedores">Ver os vencedores</a></p>`}
       ${event.status !== "rascunho" && event.status !== "arquivado" && html`
         <h2>A sua missão</h2>

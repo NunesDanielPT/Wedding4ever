@@ -1,17 +1,20 @@
 import { central } from "../db/central";
 
 export const AUDIENCES = ["cliente", "organizador", "superadmin"] as const;
+export const TEMPLATE_KEYS = [...AUDIENCES, "vencedor"] as const;
 export type Audience = (typeof AUDIENCES)[number];
+export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
 
 export interface EmailTemplate {
   subject: string;
   body: string;
 }
 
-export const AUDIENCE_LABELS: Record<Audience, string> = {
+export const AUDIENCE_LABELS: Record<TemplateKey, string> = {
   cliente: "Cliente",
   organizador: "Organizador",
   superadmin: "Superadmin",
+  vencedor: "Vencedor, para convidados",
 };
 
 export const EMAIL_VARIABLES: Record<string, string> = {
@@ -29,9 +32,11 @@ export const EMAIL_VARIABLES: Record<string, string> = {
   dias: "Dias disponíveis após o evento",
   data_limite: "Último dia disponível",
   plataforma: "Nome da plataforma",
+  missao: "Missão, só no e-mail de vencedor",
+  vencedor: "Vencedor, só no e-mail de vencedor",
 };
 
-export const DEFAULT_TEMPLATES: Record<Audience, EmailTemplate> = {
+export const DEFAULT_TEMPLATES: Record<TemplateKey, EmailTemplate> = {
   cliente: {
     subject: "O teu evento {{evento}} está criado",
     body: `Olá,
@@ -92,14 +97,27 @@ Pack: {{pack}}
 Limite de convidados: {{limite}}
 Último dia disponível: {{data_limite}}`,
   },
+  vencedor: {
+    subject: "Temos vencedor em {{missao}}",
+    body: `Olá,
+
+A votação da missão {{missao}}, no evento {{evento}}, terminou.
+
+Vencedor: {{vencedor}}
+
+Vê a fotografia vencedora aqui:
+{{link}}
+
+A equipa {{plataforma}}`,
+  },
 };
 
-export async function getTemplates(): Promise<Record<Audience, EmailTemplate>> {
-  const rows: { value: Partial<Record<Audience, EmailTemplate>> }[] = await central`SELECT value FROM settings WHERE key = 'email_templates'`;
+export async function getTemplates(): Promise<Record<TemplateKey, EmailTemplate>> {
+  const rows: { value: Partial<Record<TemplateKey, EmailTemplate>> }[] = await central`SELECT value FROM settings WHERE key = 'email_templates'`;
   return { ...DEFAULT_TEMPLATES, ...rows[0]?.value };
 }
 
-export async function saveTemplate(audience: Audience, template: EmailTemplate): Promise<void> {
+export async function saveTemplate(audience: TemplateKey, template: EmailTemplate): Promise<void> {
   const templates = { ...(await getTemplates()), [audience]: template };
   const value = JSON.stringify(templates);
   await central`

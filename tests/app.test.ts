@@ -125,7 +125,7 @@ describe("criação de clientes", () => {
   test("cria base, missões, link, QR Code e PDF", async () => {
     const event = await createClient();
     expect(event.slug).toMatch(/^joao-e-ines-[a-z2-9]{6}$/);
-    expect(event.schema_version).toBe(4);
+    expect(event.schema_version).toBe(5);
     expect(event.status).toBe("rascunho");
     expect(await events.getEventStats(event.db_name)).toEqual({ missions: 7, guests: 0, photos: 0, photoLimit: 3 });
 
@@ -189,7 +189,7 @@ describe("ciclo de vida", () => {
     const event = await createClient();
     await events.migrateAllEvents();
     const after = (await events.getEventById(event.id))!;
-    expect(after.schema_version).toBe(4);
+    expect(after.schema_version).toBe(5);
     expect(after.migration_error).toBeNull();
     expect((await events.getEventStats(event.db_name)).missions).toBe(7);
   });
@@ -1159,5 +1159,103 @@ describe("avisos em direto e app", () => {
     expect((await get(manifest.icons[0]!.src, false)).headers.get("content-type")).toContain("image/png");
     expect((await get("/sw.js", false)).status).toBe(200);
     expect(await (await get(`/e/${event.slug}`, false)).text()).toContain('rel="manifest"');
+  });
+});
+
+describe("notificações", () => {
+  const crypto = require("node:crypto");
+
+  /** Faz o papel do telemóvel: decifra a mensagem como o browser faria. */
+  function decrypt(body: Uint8Array, ecdh: any, authSecret: Buffer): string {
+    const data = Buffer.from(body);
+    const salt = data.subarray(0, 16);
+    const idLength = data[20]!;
+    const serverPublic = data.subarray(21, 21 + idLength);
+    const cipherText = data.subarray(21 + idLength);
+    const shared = ecdh.computeSecret(serverPublic);
+    const info = Buffer.concat([Buffer.from("WebPush: info\0"), ecdh.getPublicKey(), serverPublic]);
+    const ikm = Buffer.from(crypto.hkdfSync("sha256", shared, authSecret, info, 32));
+    const cek = Buffer.from(crypto.hkdfSync("sha256", ikm, salt, Buffer.from("Content-Encoding: aes128gcm\0"), 16));
+    const nonce = Buffer.from(crypto.hkdfSync("sha256", ikm, salt, Buffer.from("Content-Encoding: nonce\0"), 12));
+    const decipher = crypto.createDecipheriv("aes-128-gcm", cek, nonce);
+    decipher.setAuthTag(cipherText.subarray(cipherText.length - 16));
+    const plain = Buffer.concat([decipher.update(cipherText.subarray(0, cipherText.length - 16)), decipher.final()]);
+    expect(plain[plain.length - 1]).toBe(2);
+    return plain.subarray(0, plain.length - 1).toString();
+  }
+
+  function subscriptionFor() {
+    const ecdh = crypto.createECDH("prime256v1");
+    ecdh.generateKeys();
+    const authSecret = crypto.randomBytes(16);
+    return {
+      ecdh,
+      authSecret,
+      subscription: {
+        endpoint: "https://fcm.googleapis.com/fcm/send/teste",
+        p256dh: ecdh.getPublicKey().toString("base64url"),
+        auth: authSecret.toString("base64url"),
+      },
+    };
+  }
+
+  test("encripta a mensagem e assina o pedido para o serviço do telemóvel", async () => {
+    const { buildPushRequest, getVapidKeys } = await import("../src/lib/push");
+    const { ecdh, authSecret, subscription } = subscriptionFor();
+    const keys = await getVapidKeys();
+    const payload = JSON.stringify({ title: "A votação abriu", body: "Na pista", url: "/e/x" });
+    const request = buildPushRequest(subscription, payload, keys);
+    expect(decrypt(request.body, ecdh, authSecret)).toBe(payload);
+    expect(request.headers["Content-Encoding"]).toBe("aes128gcm");
+
+    const token = request.headers.Authorization!.match(/t=([^,]+)/)![1]!;
+    const [header, claims, signature] = token.split(".");
+    expect(JSON.parse(Buffer.from(claims!, "base64url").toString()).aud).toBe("https://fcm.googleapis.com");
+    const raw = Buffer.from(keys.publicKey, "base64url");
+    const publicKey = crypto.createPublicKey({ format: "jwk", key: {
+      kty: "EC", crv: "P-256", x: raw.subarray(1, 33).toString("base64url"), y: raw.subarray(33).toString("base64url"),
+    } });
+    const valid = crypto.verify("sha256", Buffer.from(`${header}.${claims}`), { key: publicKey, dsaEncoding: "ieee-p1363" }, Buffer.from(signature!, "base64url"));
+    expect(valid).toBe(true);
+    expect((await getVapidKeys()).publicKey).toBe(keys.publicKey);
+  });
+
+  test("aceita só servidores conhecidos e exige sessão", async () => {
+    const event = await createClient({ ...couple, name: "Evento notificações" });
+    const guest = cookieOf(await post(`/e/${event.slug}/entrar`, { name: "Rita", email: "n@exemplo.pt" }, { Cookie: "" }));
+    const { subscription } = subscriptionFor();
+    const send = (body: object, cookie: string) => handle(new Request(`${ORIGIN}/e/${event.slug}/notificacoes`, {
+      method: "POST", body: JSON.stringify(body), headers: { Origin: ORIGIN, Cookie: cookie, "Content-Type": "application/json" },
+    }));
+    expect((await send(subscription, "")).status).toBe(401);
+    expect((await send({ ...subscription, endpoint: "https://192.168.0.47/roubar" }, guest)).status).toBe(422);
+    expect((await send({ ...subscription, endpoint: "http://fcm.googleapis.com/x" }, guest)).status).toBe(422);
+    expect((await send(subscription, guest)).status).toBe(204);
+    expect((await send(subscription, guest)).status).toBe(204);
+    const rows = await events.eventDb(event.db_name)`SELECT guest_id FROM push_subscriptions`;
+    expect(rows).toHaveLength(1);
+  });
+
+  test("avisa uma vez por fase e por vencedor", async () => {
+    const { notifyEventChanges } = await import("../src/lib/notifications");
+    const event = await createClient({ ...couple, name: "Evento avisos" });
+    await events.applyEventStatus(event, "aberto");
+    await notifyEventChanges(event.id);
+    await notifyEventChanges(event.id);
+    const keys = async () => (await events.eventDb(event.db_name)`SELECT key FROM notification_log`).map((row: { key: string }) => row.key);
+    expect(await keys()).toEqual(["missoes-abertas"]);
+    const [mission] = await events.eventDb(event.db_name)`SELECT id FROM missions ORDER BY position LIMIT 1`;
+    await setMissionPhase(event.db_name, mission.id, "votacao");
+    await notifyEventChanges(event.id);
+    await notifyEventChanges(event.id);
+    expect((await keys()).filter((key: string) => key.startsWith("votacao"))).toHaveLength(1);
+  });
+
+  test("o e-mail de vencedor é editável", async () => {
+    expect(await (await get("/admin/emails")).text()).toContain("Vencedor, para convidados");
+    expect((await post("/admin/emails/vencedor/guardar", { subject: "Ganhou {{vencedor}}", body: "{{missao}}" })).status).toBe(200);
+    await post("/admin/emails/vencedor/repor", {});
+    const home = await (await get("/admin/emails")).text();
+    expect(home).toContain("Temos vencedor em {{missao}}");
   });
 });

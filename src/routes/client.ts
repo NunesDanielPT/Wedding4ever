@@ -22,6 +22,7 @@ import { zipStream } from "../lib/zip";
 import { clientContext, clientEventPage, clientEventsPage, clientExpiredPage, clientGalleryPage, clientLoginPage, clientShell } from "../views/client";
 import { designPage, newEventPage } from "../views/admin";
 import { queueEventEmails } from "../lib/event-emails";
+import { queueNotifications } from "../lib/notifications";
 import { retentionOf } from "../lib/retention";
 import { winnersPage } from "../views/winners";
 import { handleDesign } from "./design";
@@ -101,6 +102,7 @@ async function handleEventArea(req: Request, event: EventRecord, action: string,
       return eventPage(event, canManage, 422, "Não é possível aplicar esse estado.");
     }
     await applyEventStatus(event, status);
+    queueNotifications(event.id);
     return redirect(base);
   }
   const phaseRoute = action.match(/^missoes\/([0-9a-f-]{36})\/fase$/);
@@ -111,6 +113,7 @@ async function handleEventArea(req: Request, event: EventRecord, action: string,
       return eventPage(event, canManage, 422, "Escolhe uma fase válida.");
     }
     await setMissionPhase(event.db_name, phaseRoute[1]!, phase);
+    queueNotifications(event.id);
     return redirect(`${base}#missoes`);
   }
   return notFound();

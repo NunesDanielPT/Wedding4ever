@@ -26,6 +26,7 @@ Já disponível:
 - Estatísticas em `/admin/estatisticas`
 - Prazo por evento, com contagem de dias, bloqueio do acesso e eliminação manual
 - Modelos de e-mail em `/admin/emails`
+- Avisos em direto, instalação como app e notificações no telemóvel
 - Migrações automáticas em todas as bases
 
 Ainda por fazer: ranking, moderação e exportação em ZIP.

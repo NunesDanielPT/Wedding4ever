@@ -43,6 +43,8 @@ export function sampleVariables(): Record<string, string> {
     dias: "30",
     data_limite: formatDate("2027-07-12"),
     plataforma: brand(),
+    missao: "Na pista de dança",
+    vencedor: "Rita Sousa",
   };
 }
 

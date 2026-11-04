@@ -1,4 +1,4 @@
-import { AUDIENCE_LABELS, AUDIENCES, EMAIL_VARIABLES, renderTemplate, type Audience, type EmailTemplate } from "../lib/email-templates";
+import { AUDIENCE_LABELS, EMAIL_VARIABLES, renderTemplate, TEMPLATE_KEYS, type EmailTemplate, type TemplateKey } from "../lib/email-templates";
 import { EVENT_TYPES } from "../lib/event-types";
 import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
@@ -164,16 +164,17 @@ export interface EmailsNotice {
   error?: string;
 }
 
-const AUDIENCE_HINTS: Record<Audience, string> = {
+const AUDIENCE_HINTS: Record<TemplateKey, string> = {
   cliente: "Boas-vindas e tutorial. Vai para o e-mail do cliente quando o evento é criado.",
   organizador: "Vai para o organizador do evento, quando existir.",
   superadmin: "Vai para todos os administradores.",
+  vencedor: "Vai para os convidados sem notificações ativas, quando uma missão termina com vencedor.",
 };
 
-export function emailsPage(templates: Record<Audience, EmailTemplate>, sample: Record<string, string>, notice: EmailsNotice = {}): string {
+export function emailsPage(templates: Record<TemplateKey, EmailTemplate>, sample: Record<string, string>, notice: EmailsNotice = {}): string {
   return shell("E-mails", html`
     <h1>E-mails</h1>
-    <p class="lead">Estes textos são enviados quando um evento é criado, depois de ativares o serviço em Definições. As palavras entre chavetas são preenchidas automaticamente.</p>
+    <p class="lead">Estes textos são enviados automaticamente, depois de ativares o serviço em Definições. As palavras entre chavetas são preenchidas automaticamente.</p>
     ${notice.error && html`<p class="error" role="alert">${notice.error}</p>`}
     ${notice.success && html`<p class="notice" role="status">${notice.success}</p>`}
 
@@ -185,7 +186,7 @@ export function emailsPage(templates: Record<Audience, EmailTemplate>, sample: R
     </details>
 
     <div class="settings">
-      ${AUDIENCES.map((audience) => html`
+      ${TEMPLATE_KEYS.map((audience) => html`
         <section>
           <h2>${AUDIENCE_LABELS[audience]}</h2>
           <p>${AUDIENCE_HINTS[audience]}</p>

@@ -595,3 +595,6 @@ fieldset { background: var(--card); border-color: var(--line); border-radius: va
 .winner-hero strong { font-family: var(--serif); font-size: 1.6rem; font-weight: 400; }
 .winner-hero span { color: #e6c878; }
 .winner-hero em { overflow-wrap: anywhere; }
+
+.notify-message { font-size: .92rem; margin: .6rem 0 0; }
+.install-card .primary { width: 100%; }

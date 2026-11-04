@@ -9,6 +9,7 @@ import {
   updateMission,
   type MissionPhase,
 } from "../lib/missions";
+import { queueNotifications } from "../lib/notifications";
 import { getSettings, parsePhotoLimit } from "../lib/settings";
 import { missionsPage, type MissionsContext } from "../views/admin";
 import { field, htmlResponse, notFound, redirect } from "./http";
@@ -63,5 +64,6 @@ export async function handleMissions(req: Request, event: EventRecord, action: s
   if (!limit) return render(event, context, "Escolhe um limite de fotografias entre 1 e 50.", 422);
   if (!MISSION_PHASES.includes(phase)) return render(event, context, "Escolhe uma fase válida.", 422);
   await updateMission(event.db_name, missionId, title, limit, phase);
+  queueNotifications(event.id);
   return back;
 }
