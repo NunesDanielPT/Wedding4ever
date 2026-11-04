@@ -55,12 +55,18 @@ const STATIC_FILES: Record<string, string> = {
   "/static/favicon.svg": "favicon.svg",
   "/static/gallery.js": "gallery.js",
   "/static/nav.js": "nav.js",
+  "/static/live.js": "live.js",
+  "/static/install.js": "install.js",
+  "/static/icon-192.png": "icon-192.png",
+  "/static/icon-512.png": "icon-512.png",
+  "/static/apple-touch-icon.png": "apple-touch-icon.png",
+  "/sw.js": "sw.js",
   "/static/design.js": "design.js",
   "/static/site.css": "site.css",
 };
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy":
-    "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'none'; script-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   "Referrer-Policy": "same-origin",
   "X-Content-Type-Options": "nosniff",
   "X-Robots-Tag": "noindex",

@@ -2,7 +2,9 @@ import { eventDesign, getEventBySlug, listMissions, type EventRecord } from "../
 import { themeCss } from "../lib/design";
 import { mediaPath } from "../lib/event-assets";
 import { currentGuest, guestCookie, GuestLimitError, joinGuest, type Guest } from "../lib/event-auth";
-import { getWinners } from "../lib/missions";
+import { asset } from "../lib/assets";
+import { brand } from "../lib/brand";
+import { getWinners, listAdminMissions } from "../lib/missions";
 import { retentionOf } from "../lib/retention";
 import { getSettings } from "../lib/settings";
 import {
@@ -31,6 +33,28 @@ async function guestHome(req: Request, event: EventRecord): Promise<Response> {
   if (!guest) return htmlResponse(joinPage(event));
   const [missions, winners] = await Promise.all([listMissions(event.db_name, guest.id), getWinners(event.db_name)]);
   return htmlResponse(guestHomePage(event, guest, missions, winners.length > 0));
+}
+
+const LIVE_CACHE_MS = 5000;
+const liveCache = new Map<string, { at: number; data: unknown }>();
+
+/** Os dados são iguais para todos os convidados, por isso poupam-se consultas durante a festa. */
+async function liveUpdates(event: EventRecord): Promise<unknown> {
+  const cached = liveCache.get(event.id);
+  if (cached && Date.now() - cached.at < LIVE_CACHE_MS) return cached.data;
+  const [missions, winners] = await Promise.all([listAdminMissions(event.db_name), getWinners(event.db_name)]);
+  const data = {
+    status: event.status,
+    missions: missions.map(({ id, title, phase }) => ({ id, title, phase })),
+    winners: winners.map(({ id, title, photos }) => ({
+      id,
+      title,
+      photos: photos.map((photo) => ({ id: photo.id, guest: photo.guest_name })),
+    })),
+  };
+  if (liveCache.size > 200) liveCache.clear();
+  liveCache.set(event.id, { at: Date.now(), data });
+  return data;
 }
 
 function isPlaying(event: EventRecord): boolean {
@@ -133,7 +157,7 @@ export async function handleEvent(req: Request, path: string): Promise<Response 
   if (!event) return notFound();
   const action = match[2] ?? "";
 
-  const isAsset = action === "tema.css" || action.startsWith("media/");
+  const isAsset = action === "tema.css" || action === "manifest.webmanifest" || action.startsWith("media/");
   if (!isAsset && !action.startsWith("noivos")) {
     const { retentionDays } = await getSettings();
     if (retentionOf(event.event_date, retentionDays).expired) return htmlResponse(eventExpiredPage(event), 410);
@@ -163,6 +187,32 @@ export async function handleEvent(req: Request, path: string): Promise<Response 
 
   const photoResponse = await handlePhotos(req, event, action);
   if (photoResponse) return photoResponse;
+
+  if (action === "manifest.webmanifest" && req.method === "GET") {
+    return new Response(
+      JSON.stringify({
+        name: `${brand()}: ${event.name}`,
+        short_name: brand(),
+        start_url: `/e/${event.slug}`,
+        scope: `/e/${event.slug}`,
+        display: "standalone",
+        background_color: "#1f3350",
+        theme_color: "#1f3350",
+        lang: "pt-PT",
+        icons: [
+          { src: asset("icon-192.png"), sizes: "192x192", type: "image/png", purpose: "any maskable" },
+          { src: asset("icon-512.png"), sizes: "512x512", type: "image/png", purpose: "any maskable" },
+        ],
+      }),
+      { headers: { "Content-Type": "application/manifest+json", "Cache-Control": "no-cache" } },
+    );
+  }
+
+  if (action === "novidades" && req.method === "GET") {
+    const guest = await currentGuest(req, event);
+    if (!guest) return new Response(null, { status: 401 });
+    return Response.json(await liveUpdates(event), { headers: { "Cache-Control": "no-store" } });
+  }
 
   if (action === "vencedores" && req.method === "GET") {
     const guest = await currentGuest(req, event);

@@ -1119,3 +1119,34 @@ describe("e-mails de evento criado", () => {
     await post("/admin/emails/cliente/repor", {});
   });
 });
+
+describe("avisos em direto e app", () => {
+  test("informa fases e vencedores aos convidados e exige sessão", async () => {
+    const event = await createClient({ ...couple, name: "Evento em direto" });
+    await events.setEventStatus(event.id, "aberto");
+    const opened = (await events.getEventById(event.id))!;
+    const guest = cookieOf(await post(`/e/${opened.slug}/entrar`, { name: "Rita", email: "r@exemplo.pt" }, { Cookie: "" }));
+    expect((await get(`/e/${opened.slug}/novidades`, false)).status).toBe(401);
+    const response = await handle(new Request(`${ORIGIN}/e/${opened.slug}/novidades`, { headers: { Cookie: guest } }));
+    const data = await response.json() as { status: string; missions: { phase: string }[]; winners: unknown[] };
+    expect(data.status).toBe("aberto");
+    expect(data.missions).toHaveLength(7);
+    expect(data.missions[0]!.phase).toBe("envio");
+    expect(data.winners).toEqual([]);
+    expect(JSON.stringify(data)).not.toContain("exemplo.pt");
+    const home = await (await handle(new Request(`${ORIGIN}/e/${opened.slug}`, { headers: { Cookie: guest } }))).text();
+    expect(home).toContain("data-live");
+    expect(home).toContain("data-install-button");
+  });
+
+  test("publica o manifesto, os ícones e o service worker", async () => {
+    const event = await createClient({ ...couple, name: "Evento app" });
+    const response = await get(`/e/${event.slug}/manifest.webmanifest`, false);
+    expect(response.headers.get("content-type")).toContain("manifest");
+    const manifest = await response.json() as { start_url: string; icons: { src: string }[] };
+    expect(manifest.start_url).toBe(`/e/${event.slug}`);
+    expect((await get(manifest.icons[0]!.src, false)).headers.get("content-type")).toContain("image/png");
+    expect((await get("/sw.js", false)).status).toBe(200);
+    expect(await (await get(`/e/${event.slug}`, false)).text()).toContain('rel="manifest"');
+  });
+});

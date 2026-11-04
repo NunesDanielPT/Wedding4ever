@@ -1,4 +1,5 @@
 import { asset } from "../lib/assets";
+import { brand } from "../lib/brand";
 import { STATUS_LABELS } from "./admin";
 import { eventDesign, type EventRecord, type EventStatus, type Mission } from "../db/events";
 import { formatDate, initials } from "../lib/format";
@@ -15,9 +16,41 @@ const MESSAGES: Record<EventStatus, string> = {
   arquivado: "Este evento terminou. Obrigado por teres participado.",
 };
 
-function themed(event: EventRecord, title: string, body: Html): string {
-  return page(title, body, "guest-page themed t-image", `/e/${event.slug}/tema.css`);
+function appHead(event: EventRecord): Html {
+  return html`
+    <link rel="manifest" href="/e/${event.slug}/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="${asset("apple-touch-icon.png")}">
+    <meta name="theme-color" content="#1f3350">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="${brand()}">
+  `;
 }
+
+function themed(event: EventRecord, title: string, body: Html): string {
+  return page(title, body, "guest-page themed t-image", `/e/${event.slug}/tema.css`, undefined, appHead(event));
+}
+
+function liveScripts(event: EventRecord): Html {
+  const base = `/e/${event.slug}`;
+  return html`
+    <div data-live="${base}/novidades" data-base="${base}" hidden></div>
+    <script src="${asset("live.js")}" defer></script>
+    <script src="${asset("install.js")}" defer></script>
+  `;
+}
+
+const installCard = html`
+  <section class="install-card" data-install hidden>
+    <h2>Instala a app no telemóvel</h2>
+    <p>Fica no ecrã do telemóvel, para entrares mais depressa.</p>
+    <div class="live-actions">
+      <button class="primary" type="button" data-install-button>Instalar</button>
+      <button type="button" data-install-close>Agora não</button>
+    </div>
+    <ol class="install-steps" data-install-steps hidden></ol>
+  </section>
+`;
 
 function heading(event: EventRecord): Html {
   const design = eventDesign(event);
@@ -57,6 +90,7 @@ export function guestHomePage(event: EventRecord, guest: Guest, missions: Missio
     <main class="guest">
       ${heading(event)}
       <p>Olá, ${guest.full_name}. ${MESSAGES[event.status]}</p>
+      ${installCard}
       ${hasWinners && html`<p><a class="primary winners-link" href="/e/${event.slug}/vencedores">Ver os vencedores</a></p>`}
       ${event.status !== "rascunho" && event.status !== "arquivado" && html`
         <h2>A sua missão</h2>
@@ -70,6 +104,7 @@ export function guestHomePage(event: EventRecord, guest: Guest, missions: Missio
                 </a></li>`)}
             </ul>`}`}
     </main>
+    ${liveScripts(event)}
   `);
 }
 
@@ -184,6 +219,7 @@ export function missionPage(
         <p>A votação terminou.</p>
         ${gallery(event, guest, mission, photos)}`}
     </main>
+    ${liveScripts(event)}
   `);
 }
 

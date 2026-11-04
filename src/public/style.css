@@ -561,3 +561,29 @@ fieldset { background: var(--card); border-color: var(--line); border-radius: va
 }
 
 .stat-table.email-log th, .stat-table.email-log td { text-align: left; white-space: normal; }
+
+/* Avisos em direto e instalação */
+.live-popup { background: var(--card); border: 0; border-radius: 24px; box-shadow: 0 24px 60px rgba(17, 29, 48, .4); color: var(--ink); max-height: 88dvh; max-width: min(420px, calc(100vw - 2rem)); overflow: auto; padding: 1.5rem; position: fixed; text-align: center; width: 100%; }
+.live-popup::backdrop { background: rgba(17, 29, 48, .62); }
+.live-popup h2 { color: var(--navy); font-size: 1.5rem; margin: 0 0 .4rem; }
+.live-popup p { margin: 0 0 1rem; overflow-wrap: anywhere; }
+.live-popup img { border-radius: var(--radius-md); display: block; height: auto; margin: 0 auto 1rem; max-height: 46dvh; max-width: 100%; }
+.live-actions { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; }
+.live-actions .primary, .live-actions button { flex: 1 1 8rem; text-align: center; }
+.live-actions .primary { line-height: 1.7; }
+.live-winner { background: radial-gradient(circle at 50% 0, #2a4468, #111d30 75%); color: #fff; overflow: hidden; }
+.live-winner h2 { color: #fff; position: relative; }
+.live-winner p, .live-winner img, .live-winner .live-actions { position: relative; z-index: 1; }
+.live-winner img { border: 3px solid #e6c878; box-shadow: 0 0 34px rgba(230, 200, 120, .5); }
+.live-winner .winner-word { animation: winner-in .8s cubic-bezier(.2, 1.4, .4, 1) both, winner-shine 3s linear .8s infinite; font-size: clamp(2.8rem, 15vw, 4rem); margin-bottom: .5rem; }
+.live-winner .confetti span { animation-play-state: running; }
+.live-winner button { background: none; border-color: rgba(255, 255, 255, .4); color: #fff; }
+.live-winner .primary { background: #e6c878; border-color: #e6c878; color: #17263c; }
+.install-card { background: rgba(255, 255, 255, .72); border: 1px solid var(--line); border-radius: var(--radius-md); margin: 1rem 0; padding: 1rem; text-align: left; }
+.install-card h2 { font-size: 1.15rem; margin: 0 0 .25rem; }
+.install-card p { margin-bottom: .75rem; }
+.install-steps { margin: .9rem 0 0; padding-left: 1.3rem; }
+.install-steps li { margin-bottom: .3rem; }
+@media (prefers-reduced-motion: reduce) {
+  .live-winner .winner-word { animation: none; }
+}
