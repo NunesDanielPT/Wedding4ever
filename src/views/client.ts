@@ -8,20 +8,19 @@ import { PHASE_LABELS, type AdminMission, type AlbumPhoto, type MissionPhase } f
 import { EVENT_TYPES } from "../lib/event-types";
 import { retentionOf } from "../lib/retention";
 import { type DesignContext, STATUS_LABELS } from "./admin";
+import { appShell } from "./app-shell";
 import { guestTable } from "./guests";
 import { page, rings } from "./layout";
 
 export function clientShell(title: string, content: Html, stylesheet?: string): string {
-  return page(`${title} | ${brand()}`, html`
-    <header class="topbar">
-      <a class="brand" href="/cliente">${rings}<span>${brand()}</span></a>
-      <nav class="topnav">
-        <a href="/cliente">Os meus eventos</a>
-        <form method="post" action="/cliente/sair"><button class="link-button">Sair</button></form>
-      </nav>
-    </header>
-    <main class="admin">${content}</main>
-  `, "", stylesheet);
+  return appShell({
+    title,
+    home: "/cliente",
+    groups: [{ items: [{ href: "/cliente", label: "Os meus eventos", icon: "events" }] }],
+    logout: "/cliente/sair",
+    content,
+    stylesheet,
+  });
 }
 
 export function clientContext(event: EventRecord): DesignContext {

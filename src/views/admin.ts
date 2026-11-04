@@ -15,6 +15,7 @@ import { EVENT_TYPE_IDS, EVENT_TYPES } from "../lib/event-types";
 import { BORDERS, COLOR_PRESETS, FONTS, QR_SIZES } from "../lib/design";
 import { MAX_PHOTO_LIMIT, MIN_PHOTO_LIMIT, type PlatformSettings } from "../lib/settings";
 import { guestTable } from "./guests";
+import { appShell } from "./app-shell";
 import { page, rings } from "./layout";
 
 export const STATUS_LABELS: Record<EventStatus, string> = {
@@ -25,23 +26,28 @@ export const STATUS_LABELS: Record<EventStatus, string> = {
   arquivado: "Arquivado",
 };
 
+const ADMIN_NAV = [
+  {
+    title: "Gestão",
+    items: [
+      { href: "/admin", label: "Eventos", icon: "events" },
+      { href: "/admin/organizadores", label: "Organizadores", icon: "people" },
+      { href: "/admin/estatisticas", label: "Estatísticas", icon: "chart" },
+    ],
+  },
+  {
+    title: "Comunicação",
+    items: [
+      { href: "/admin/mensagens", label: "Mensagens", icon: "inbox" },
+      { href: "/admin/emails", label: "E-mails", icon: "mail" },
+      { href: "/admin/site", label: "Site", icon: "site" },
+    ],
+  },
+  { title: "Sistema", items: [{ href: "/admin/definicoes", label: "Definições", icon: "settings" }] },
+];
+
 export function shell(title: string, content: Html, stylesheet?: string): string {
-  return page(`${title} | ${brand()}`, html`
-    <header class="topbar">
-      <a class="brand" href="/admin">${rings}<span>${brand()}</span></a>
-      <nav class="topnav">
-        <a href="/admin">Eventos</a>
-        <a href="/admin/organizadores">Organizadores</a>
-        <a href="/admin/estatisticas">Estatísticas</a>
-        <a href="/admin/emails">E-mails</a>
-        <a href="/admin/site">Site</a>
-        <a href="/admin/mensagens">Mensagens</a>
-        <a href="/admin/definicoes">Definições</a>
-        <form method="post" action="/admin/sair"><button class="link-button">Sair</button></form>
-      </nav>
-    </header>
-    <main class="admin">${content}</main>
-  `, "", stylesheet);
+  return appShell({ title, home: "/admin", groups: ADMIN_NAV, logout: "/admin/sair", content, stylesheet });
 }
 
 export function loginPage(error?: string): string {

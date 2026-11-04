@@ -54,6 +54,7 @@ const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
   "/static/favicon.svg": "favicon.svg",
   "/static/gallery.js": "gallery.js",
+  "/static/nav.js": "nav.js",
   "/static/design.js": "design.js",
   "/static/site.css": "site.css",
 };
