@@ -38,7 +38,7 @@ const { migrate } = await import("../src/db/migrate");
 const events = await import("../src/db/events");
 const { ensureFirstAdmin } = await import("../src/lib/auth");
 const { handle } = await import("../src/server");
-const { detectAudio, getEventVideo, listMusic, pickVideoPhotos } = await import("../src/lib/video");
+const { detectAudio, getEventVideo, listMusic, MOTIONS, pickDifferent, pickTone, pickVideoPhotos } = await import("../src/lib/video");
 
 let cookie = "";
 
@@ -1478,6 +1478,19 @@ describe("vídeo do evento", () => {
     const photos = [photo("a1", "a", 1, 5), photo("a2", "a", 1, 3), photo("a3", "a", 1, 1), photo("b1", "b", 2, 2)];
     expect(pickVideoPhotos(photos, 3).map((item) => item.id)).toEqual(["a2", "a1", "b1"]);
     expect(pickVideoPhotos(photos, 99).length).toBe(4);
+  });
+
+  test("varia os movimentos sem repetir e nunca muda o tom das vencedoras", () => {
+    let previous: (typeof MOTIONS)[number] | undefined;
+    for (let i = 0; i < 200; i++) {
+      const next = pickDifferent(MOTIONS, previous);
+      expect(next).not.toBe(previous);
+      previous = next;
+    }
+    expect(pickTone(true, () => 0.99)).toBe("natural");
+    expect(pickTone(false, () => 0.1)).toBe("natural");
+    expect(pickTone(false, () => 0.7)).toBe("preto-e-branco");
+    expect(pickTone(false, () => 0.9)).toBe("quente");
   });
 
   test("reconhece os formatos de áudio e recusa o resto", () => {

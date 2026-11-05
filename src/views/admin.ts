@@ -222,7 +222,7 @@ function videoSection(event: EventRecord, { video, music, photos }: VideoData): 
   return html`
     <section class="guests-section" id="video">
       <h2>Vídeo do evento</h2>
-      <p>Só o superadmin vê esta área. O vídeo usa as fotografias visíveis, com título, missões e vencedores no fim de cada missão.</p>
+      <p>Só o superadmin vê esta área. O vídeo usa as fotografias visíveis, com título, missões e vencedores no fim de cada missão. Os movimentos e as transições são aleatórios, por isso cada geração sai diferente.</p>
       ${video?.status === "na_fila" && html`<p class="notice" role="status">O vídeo está na fila.</p>`}
       ${video?.status === "a_gerar" && html`<div class="video-progress">
         <p class="notice" role="status">A gerar o vídeo: ${video.progress}%.</p>

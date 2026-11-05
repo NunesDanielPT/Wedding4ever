@@ -16,7 +16,8 @@ const HEIGHT = 1080;
 const FPS = 25;
 const HOLD_FRAMES = 80;
 const FADE_FRAMES = 20;
-const STEP_TIMEOUT_MS = 180_000;
+const CLIP_FRAMES = HOLD_FRAMES + 2 * FADE_FRAMES;
+const STEP_TIMEOUT_MS = 600_000;
 const SERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf";
 const SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 const X264 = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-bf", "0", "-pix_fmt", "yuv420p", "-threads", "2"];
@@ -179,6 +180,51 @@ export function pickVideoPhotos(photos: VideoPhoto[], limit: number): VideoPhoto
   return [...picked].sort((a, b) => a.position - b.position || a.votes - b.votes);
 }
 
+export const MOTIONS = ["zoom-in", "zoom-out", "pan-left", "pan-right", "pan-up", "pan-down"] as const;
+export const TRANSITIONS = ["fade", "dissolve", "fadeblack", "smoothleft", "smoothright", "slideup", "circleopen", "radial"] as const;
+export const TONES = ["natural", "preto-e-branco", "quente"] as const;
+export type Motion = (typeof MOTIONS)[number];
+export type Transition = (typeof TRANSITIONS)[number];
+export type Tone = (typeof TONES)[number];
+
+/** Escolhe ao acaso sem repetir a escolha anterior. */
+export function pickDifferent<T>(options: readonly T[], previous: T | undefined, random = Math.random): T {
+  const choices = options.filter((option) => option !== previous);
+  return choices[Math.floor(random() * choices.length)] ?? options[0]!;
+}
+
+/** Duas em cada três fotos ficam com as cores reais; as vencedoras nunca mudam. */
+export function pickTone(winner: boolean, random = Math.random): Tone {
+  if (winner) return "natural";
+  const roll = random();
+  if (roll < 2 / 3) return "natural";
+  return roll < 5 / 6 ? "preto-e-branco" : "quente";
+}
+
+const TONE_FILTERS: Record<Tone, string> = {
+  natural: "",
+  "preto-e-branco": "hue=s=0,eq=contrast=1.08,",
+  quente: "colorbalance=rs=.08:bs=-.08:rm=.05:bm=-.05,",
+};
+
+/** A imagem é ampliada antes do zoompan, para o movimento não andar aos saltos. */
+function motionFilter(motion: Motion, zoom: number): string {
+  const end = CLIP_FRAMES - 1;
+  const progress = `on/${end}`;
+  const centerX = "(iw-iw/zoom)/2";
+  const centerY = "(ih-ih/zoom)/2";
+  const paths: Record<Motion, [string, string, string]> = {
+    "zoom-in": [`1+${zoom - 1}*${progress}`, centerX, centerY],
+    "zoom-out": [`${zoom}-${zoom - 1}*${progress}`, centerX, centerY],
+    "pan-left": [String(zoom), `(iw-iw/zoom)*(1-${progress})`, centerY],
+    "pan-right": [String(zoom), `(iw-iw/zoom)*${progress}`, centerY],
+    "pan-up": [String(zoom), centerX, `(ih-ih/zoom)*(1-${progress})`],
+    "pan-down": [String(zoom), centerX, `(ih-ih/zoom)*${progress}`],
+  };
+  const [z, x, y] = paths[motion];
+  return `scale=${WIDTH * 2}:${HEIGHT * 2}:flags=bicubic,zoompan=z='${z}':x='${x}':y='${y}':d=${CLIP_FRAMES}:s=${WIDTH}x${HEIGHT}:fps=${FPS}`;
+}
+
 /** Tira emojis e outros caracteres que a fonte não desenha. */
 function printable(text: string): string {
   return text.replace(/[^\p{L}\p{N}\p{P}\p{Zs}+=$€£~^|<>]/gu, "").replace(/\s+/g, " ").trim();
@@ -230,29 +276,38 @@ async function renderCard(dir: string, index: number, card: Card, colors: { back
     "-vf", filters.join(","), "-frames:v", "1", "-q:v", "2", "-update", "1", `s${index}.jpg`], dir);
 }
 
-async function renderPhoto(dir: string, index: number, source: string, caption: string | undefined): Promise<void> {
-  const graph =
+async function renderPhoto(dir: string, index: number, source: string, tone: Tone): Promise<void> {
+  const filter =
     `[0:v]scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase,crop=${WIDTH}:${HEIGHT},boxblur=28:2,eq=brightness=-0.2[bg];` +
-    `[0:v]scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2`;
-  let filter = graph;
-  if (caption) {
-    filter += `,drawbox=x=0:y=${HEIGHT - 150}:w=${WIDTH}:h=150:color=black@0.55:t=fill,`;
-    filter += await textFilter(dir, `p${index}`, printable(caption), SERIF, 52, "white", HEIGHT - 108);
-  }
+    `[0:v]scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,${TONE_FILTERS[tone]}format=yuvj444p`;
   await run(["ffmpeg", "-v", "error", "-y", "-i", source, "-filter_complex", filter, "-frames:v", "1", "-q:v", "2", "-update", "1", `s${index}.jpg`], dir);
 }
 
-async function encodeHold(dir: string, index: number): Promise<void> {
-  await run(["ffmpeg", "-v", "error", "-y", "-loop", "1", "-framerate", String(FPS), "-i", `s${index}.jpg`,
-    "-frames:v", String(HOLD_FRAMES), "-vf", "scale=in_range=pc:out_range=tv", ...X264, `hold${index}.mp4`], dir);
+/** Cria o clipe completo; o início e o fim servem depois para as transições. */
+async function encodeMotion(dir: string, index: number, motion: Motion, zoom: number, caption?: string): Promise<void> {
+  const filters = [motionFilter(motion, zoom), "scale=in_range=pc:out_range=tv", "format=yuv420p"];
+  if (caption) {
+    filters.push(`drawbox=x=0:y=${HEIGHT - 150}:w=${WIDTH}:h=150:color=black@0.55:t=fill`);
+    filters.push(await textFilter(dir, `p${index}`, printable(caption), SERIF, 52, "white", HEIGHT - 108));
+  }
+  await run(["ffmpeg", "-v", "error", "-y", "-i", `s${index}.jpg`, "-vf", filters.join(","), "-frames:v", String(CLIP_FRAMES),
+    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "12", "-g", "1", "-threads", "2", `m${index}.mp4`], dir);
 }
 
-async function encodeFade(dir: string, index: number): Promise<void> {
+async function encodeHold(dir: string, index: number): Promise<void> {
+  await run(["ffmpeg", "-v", "error", "-y", "-i", `m${index}.mp4`,
+    "-vf", `trim=start_frame=${FADE_FRAMES}:end_frame=${FADE_FRAMES + HOLD_FRAMES},setpts=PTS-STARTPTS`, ...X264, `hold${index}.mp4`], dir);
+}
+
+async function encodeFade(dir: string, index: number, transition: Transition): Promise<void> {
   const seconds = FADE_FRAMES / FPS;
-  await run(["ffmpeg", "-v", "error", "-y", "-loop", "1", "-framerate", String(FPS), "-i", `s${index}.jpg`,
-    "-loop", "1", "-framerate", String(FPS), "-i", `s${index + 1}.jpg`,
-    "-filter_complex", `[0:v]format=yuv420p[a];[1:v]format=yuv420p[b];[a][b]xfade=transition=fade:duration=${seconds}:offset=0,scale=in_range=pc:out_range=tv`,
-    "-frames:v", String(FADE_FRAMES), ...X264, `fade${index}.mp4`], dir);
+  const graph =
+    `[0:v]trim=start_frame=${FADE_FRAMES + HOLD_FRAMES}:end_frame=${CLIP_FRAMES},setpts=PTS-STARTPTS[a];` +
+    `[1:v]trim=end_frame=${FADE_FRAMES},setpts=PTS-STARTPTS[b];` +
+    `[a][b]xfade=transition=${transition}:duration=${seconds}:offset=0`;
+  await run(["ffmpeg", "-v", "error", "-y", "-i", `m${index}.mp4`, "-i", `m${index + 1}.mp4`,
+    "-filter_complex", graph, "-frames:v", String(FADE_FRAMES), ...X264, `fade${index}.mp4`], dir);
+  await rm(join(dir, `m${index}.mp4`), { force: true });
 }
 
 function buildCards(event: EventRecord, photos: VideoPhoto[]): (Card | VideoPhoto)[] {
@@ -288,13 +343,23 @@ async function buildVideo(event: EventRecord, track: MusicTrack | undefined, max
   try {
     const slides = buildCards(event, photos);
     const parts: string[] = [];
+    let motion: Motion | undefined;
+    let transition: Transition | undefined;
+    let tone: Tone = "natural";
     for (const [i, slide] of slides.entries()) {
+      motion = pickDifferent(MOTIONS, motion);
       if ("id" in slide) {
-        await renderPhoto(dir, i, previewPath(event.id, slide.id), slide.winner ? `Vencedor: ${slide.guest_name}` : undefined);
-      } else await renderCard(dir, i, slide, colors);
+        tone = pickTone(slide.winner);
+        await renderPhoto(dir, i, previewPath(event.id, slide.id), tone);
+        await encodeMotion(dir, i, slide.winner ? "zoom-in" : motion, 1.14, slide.winner ? `Vencedor: ${slide.guest_name}` : undefined);
+      } else {
+        await renderCard(dir, i, slide, colors);
+        await encodeMotion(dir, i, "zoom-in", 1.05);
+      }
       await encodeHold(dir, i);
       if (i > 0) {
-        await encodeFade(dir, i - 1);
+        transition = pickDifferent(TRANSITIONS, transition);
+        await encodeFade(dir, i - 1, transition);
         parts.push(`file fade${i - 1}.mp4`);
       }
       parts.push(`file hold${i}.mp4`);
