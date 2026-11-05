@@ -301,9 +301,11 @@ async function encodeHold(dir: string, index: number): Promise<void> {
 
 async function encodeFade(dir: string, index: number, transition: Transition): Promise<void> {
   const seconds = FADE_FRAMES / FPS;
+  /* O ffmpeg 7 recusa o xfade se o trim deixar a cadência dos frames por definir. */
+  const rate = `fps=${FPS},settb=1/${FPS}`;
   const graph =
-    `[0:v]trim=start_frame=${FADE_FRAMES + HOLD_FRAMES}:end_frame=${CLIP_FRAMES},setpts=PTS-STARTPTS[a];` +
-    `[1:v]trim=end_frame=${FADE_FRAMES},setpts=PTS-STARTPTS[b];` +
+    `[0:v]trim=start_frame=${FADE_FRAMES + HOLD_FRAMES}:end_frame=${CLIP_FRAMES},setpts=PTS-STARTPTS,${rate}[a];` +
+    `[1:v]trim=end_frame=${FADE_FRAMES},setpts=PTS-STARTPTS,${rate}[b];` +
     `[a][b]xfade=transition=${transition}:duration=${seconds}:offset=0`;
   await run(["ffmpeg", "-v", "error", "-y", "-i", `m${index}.mp4`, "-i", `m${index + 1}.mp4`,
     "-filter_complex", graph, "-frames:v", String(FADE_FRAMES), ...X264, `fade${index}.mp4`], dir);
@@ -368,7 +370,7 @@ async function buildVideo(event: EventRecord, track: MusicTrack | undefined, max
     await Bun.write(join(dir, "list.txt"), `${parts.join("\n")}\n`);
     const duration = (slides.length * HOLD_FRAMES + (slides.length - 1) * FADE_FRAMES) / FPS;
     const audio = track
-      ? ["-stream_loop", "-1", "-i", musicPath(track), "-af", `afade=t=out:st=${Math.max(0, duration - 3)}:d=3`, "-c:a", "aac", "-b:a", "192k", "-t", String(duration)]
+      ? ["-stream_loop", "-1", "-i", musicPath(track), "-map", "0:v:0", "-map", "1:a:0", "-af", `afade=t=out:st=${Math.max(0, duration - 3)}:d=3`, "-c:a", "aac", "-b:a", "192k", "-t", String(duration)]
       : [];
     await run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", "list.txt", ...audio, "-c:v", "copy", "-movflags", "+faststart", "final.mp4"], dir);
     await rename(join(dir, "final.mp4"), videoPath(event.id));
