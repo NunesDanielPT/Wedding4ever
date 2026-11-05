@@ -11,4 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t diag .
-      - run: docker run --rm -v "$PWD/.diag:/diag:ro" --entrypoint bash diag /diag/run.sh
+      - run: docker run -d --network host -e POSTGRES_PASSWORD=test postgres:16-alpine
+      - run: sleep 8
+      - run: docker run --rm --network host -v "$PWD/tests:/app/tests:ro" -e TEST_POSTGRES_URL=postgres://postgres:test@127.0.0.1:5432/postgres -e STORAGE_DIR=/tmp/s --entrypoint bun diag test 2>&1 | tail -40
+        shell: bash
