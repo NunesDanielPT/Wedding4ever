@@ -1,0 +1,14 @@
+name: Diagnostico video
+on:
+  push:
+    branches: [diag-video]
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t diag .
+      - run: docker run --rm -v "$PWD/.diag:/diag:ro" --entrypoint bash diag /diag/run.sh
