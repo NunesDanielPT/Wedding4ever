@@ -634,3 +634,9 @@ fieldset { background: var(--card); border-color: var(--line); border-radius: va
 .moderation summary { color: var(--danger); cursor: pointer; }
 .credits-form { margin-bottom: .5rem; }
 .notes-form { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 1.25rem; }
+
+.event-video { aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius-lg); display: block; margin: .75rem 0 .4rem; max-width: 720px; width: 100%; }
+.video-progress progress { accent-color: var(--gold-text); display: block; margin: .5rem 0; max-width: 420px; width: 100%; }
+.music-list { display: grid; gap: .75rem; list-style: none; margin: 1rem 0 0; padding: 0; }
+.music-list li { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); display: grid; gap: .55rem; padding: 1rem; }
+.music-list audio { max-width: 100%; width: 100%; }

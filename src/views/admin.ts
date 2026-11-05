@@ -15,6 +15,7 @@ import { MAX_TITLE_LENGTH, MISSION_PHASES, PHASE_LABELS, type AdminMission } fro
 import { EVENT_TYPE_IDS, EVENT_TYPES } from "../lib/event-types";
 import { BORDERS, COLOR_PRESETS, FONTS, QR_SIZES } from "../lib/design";
 import { MAX_PHOTO_LIMIT, MIN_PHOTO_LIMIT, type EmailNotice, type PlatformSettings } from "../lib/settings";
+import { VIDEO_LENGTHS, type EventVideo, type MusicTrack } from "../lib/video";
 import { guestTable } from "./guests";
 import { appShell } from "./app-shell";
 import { page, rings } from "./layout";
@@ -44,7 +45,13 @@ const ADMIN_NAV = [
       { href: "/admin/site", label: "Site", icon: "site" },
     ],
   },
-  { title: "Sistema", items: [{ href: "/admin/definicoes", label: "Definições", icon: "settings" }] },
+  {
+    title: "Sistema",
+    items: [
+      { href: "/admin/musica", label: "Música dos vídeos", icon: "music" },
+      { href: "/admin/definicoes", label: "Definições", icon: "settings" },
+    ],
+  },
 ];
 
 export function shell(title: string, content: Html, stylesheet?: string): string {
@@ -199,6 +206,86 @@ export function newEventPage(packs: SiteItem[], values: EventForm = {}, error?: 
   `);
 }
 
+export interface VideoData {
+  video?: EventVideo;
+  music: MusicTrack[];
+  photos: number;
+}
+
+function clock(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function videoSection(event: EventRecord, { video, music, photos }: VideoData): Html {
+  const base = `/admin/clientes/${event.id}`;
+  const busy = video?.status === "na_fila" || video?.status === "a_gerar";
+  return html`
+    <section class="guests-section" id="video">
+      <h2>Vídeo do evento</h2>
+      <p>Só o superadmin vê esta área. O vídeo usa as fotografias visíveis, com título, missões e vencedores no fim de cada missão.</p>
+      ${video?.status === "na_fila" && html`<p class="notice" role="status">O vídeo está na fila.</p>`}
+      ${video?.status === "a_gerar" && html`<div class="video-progress">
+        <p class="notice" role="status">A gerar o vídeo: ${video.progress}%.</p>
+        <progress max="100" value="${video.progress}">${video.progress}%</progress>
+      </div>`}
+      ${busy && html`<p><a class="action" href="${base}#video">Atualizar o estado</a></p>`}
+      ${video?.status === "erro" && html`<p class="error" role="alert">${video.error}</p>`}
+      ${video?.has_file && html`
+        <video class="event-video" controls preload="metadata" src="${base}/video.mp4"></video>
+        <p class="hint">${video.photos} ${video.photos === 1 ? "fotografia" : "fotografias"}, ${clock(video.duration)}, ${(video.bytes / 1024 / 1024).toFixed(1)} MB</p>
+        <p class="event-actions"><a class="action" href="${base}/video.mp4?descarregar=1">Descarregar vídeo</a></p>`}
+      ${!busy && (photos === 0
+        ? html`<p class="hint">Este evento ainda não tem fotografias para o vídeo.</p>`
+        : html`<form method="post" action="${base}/video/gerar" class="stack narrow">
+            <div class="pair">
+              <label>Música
+                <select name="musicId">
+                  <option value="">Sem música</option>
+                  ${music.map((track) => html`<option value="${track.id}" ${track.id === video?.music_id ? new Html("selected") : ""}>${track.name} (${clock(track.duration)})</option>`)}
+                </select>
+              </label>
+              <label>Fotografias
+                <select name="maxPhotos">
+                  ${VIDEO_LENGTHS.map((length) => html`<option value="${length}" ${length === (video?.max_photos ?? 40) ? new Html("selected") : ""}>Até ${length}</option>`)}
+                </select>
+              </label>
+            </div>
+            ${music.length === 0 && html`<p class="hint">Para ter música, adiciona-a em <a href="/admin/musica">Música dos vídeos</a>.</p>`}
+            <button class="primary">${video?.has_file ? "Gerar novo vídeo" : "Gerar vídeo"}</button>
+          </form>`)}
+      ${video?.has_file && !busy && html`<details class="danger-zone"><summary>Apagar vídeo</summary>
+        <form method="post" action="${base}/video/apagar"><button class="destructive">Confirmar apagar vídeo</button></form>
+      </details>`}
+    </section>`;
+}
+
+export function musicPage(tracks: MusicTrack[], error?: string): string {
+  return shell("Música dos vídeos", html`
+    <h1>Música dos vídeos</h1>
+    <p class="lead">As músicas aqui ficam disponíveis para os vídeos dos eventos. Usa só músicas com licença para este uso.</p>
+    ${error && html`<p class="error" role="alert">${error}</p>`}
+    <section class="settings-card">
+      <h2>Adicionar música</h2>
+      <form method="post" action="/admin/musica" enctype="multipart/form-data" class="stack narrow">
+        <label>Ficheiro<input type="file" name="music" accept=".mp3,.m4a,.wav,.ogg,audio/*" required></label>
+        <label>Nome<input name="name" maxlength="120" placeholder="Por omissão, o nome do ficheiro"></label>
+        <p class="hint">MP3, M4A, WAV ou OGG, até 25 MB.</p>
+        <button class="primary">Adicionar música</button>
+      </form>
+    </section>
+    ${tracks.length === 0
+      ? html`<p class="empty">Ainda não há músicas.</p>`
+      : html`<ul class="music-list">${tracks.map((track) => html`
+          <li>
+            <div><strong>${track.name}</strong> <span class="hint">${clock(track.duration)}</span></div>
+            <audio controls preload="none" src="/admin/musica/${track.id}"></audio>
+            <details><summary>Apagar</summary>
+              <form method="post" action="/admin/musica/${track.id}/apagar"><button class="destructive">Confirmar apagar música</button></form>
+            </details>
+          </li>`)}</ul>`}
+  `);
+}
+
 export function eventPage(
   event: EventRecord,
   stats: EventStats | null,
@@ -209,6 +296,7 @@ export function eventPage(
   retentionDays = 30,
   emails: EmailLogRow[] = [],
   emailReady = false,
+  videoData: VideoData = { music: [], photos: 0 },
 ): string {
   const url = eventUrl(event);
   const retention = retentionForEvent(event, retentionDays);
@@ -340,6 +428,8 @@ export function eventPage(
       </form>
       ${event.album_token && html`<form method="post" action="/admin/clientes/${event.id}/download/fechar" class="email-send"><button class="link-button link-danger">Fechar o link de download</button></form>`}
     </section>
+
+    ${videoSection(event, videoData)}
 
     <section class="guests-section">
       <h2>E-mails do evento</h2>

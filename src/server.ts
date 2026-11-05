@@ -41,6 +41,10 @@ import { generateClientCode } from "./lib/event-auth";
 import { sendMail } from "./lib/mail";
 import { EMAIL_NOTICES, getSettings, parsePhotoLimit, saveBrandName, saveEmailNotices, saveDefaultPhotoLimit, saveEmailSettings, saveRetentionDays, type SmtpSecurity } from "./lib/settings";
 import { countUnreadMessages, getSite, type SiteItem } from "./lib/site";
+import {
+  addMusic, countVideoPhotos, deleteVideo, getEventVideo, getMusic, listMusic, MAX_MUSIC_BYTES, mediaResponse,
+  musicPath, removeMusic, requestVideo, VIDEO_LENGTHS, VideoError, videoPath,
+} from "./lib/video";
 import { handleSiteAdmin } from "./routes/admin-site";
 import { handleClient } from "./routes/client";
 import { handleDesign } from "./routes/design";
@@ -53,7 +57,7 @@ import { queueNotifications, sendDownloadEmails } from "./lib/notifications";
 import { archiveEvent } from "./lib/stats";
 import * as admin from "./views/admin";
 
-const VERSION = "2026-11-05-comercial";
+const VERSION = "2026-11-05-video";
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
@@ -72,7 +76,7 @@ const STATIC_FILES: Record<string, string> = {
 };
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy":
-    "default-src 'none'; script-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'none'; script-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   "Referrer-Policy": "same-origin",
   "X-Content-Type-Options": "nosniff",
   "X-Robots-Tag": "noindex",
@@ -94,9 +98,15 @@ async function eventDetail(id: string, error?: string, status = 200, coupleCode?
     console.error(`Base ${event.db_name} indisponível`, cause);
     return [null, []];
   });
-  const [settings, emails] = await Promise.all([getSettings(), listEmailLog(id)]);
+  const [settings, emails, video, music, videoPhotos] = await Promise.all([
+    getSettings(),
+    listEmailLog(id),
+    getEventVideo(id),
+    listMusic(),
+    countVideoPhotos(event.db_name).catch(() => 0),
+  ]);
   const emailReady = settings.email.enabled && Boolean(settings.email.host);
-  return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode, settings.retentionDays, emails, emailReady), status);
+  return htmlResponse(admin.eventPage(event, stats, guests, (await getSite()).packs, error, coupleCode, settings.retentionDays, emails, emailReady, { video, music, photos: videoPhotos }), status);
 }
 
 
@@ -215,6 +225,59 @@ async function handleSettings(req: Request, path: string): Promise<Response> {
   return notFound();
 }
 
+async function handleMusic(req: Request, path: string): Promise<Response> {
+  const render = async (error?: string, status = 200) => htmlResponse(admin.musicPage(await listMusic(), error), status);
+  if (path === "/admin/musica") {
+    if (req.method === "GET") return render();
+    if (req.method !== "POST") return new Response(null, { status: 405 });
+    const form = await req.formData();
+    const file = form.get("music");
+    if (!(file instanceof File) || file.size === 0) return render("Escolhe um ficheiro de música.", 422);
+    if (file.size > MAX_MUSIC_BYTES) return render("Cada música pode ter até 25 MB.", 413);
+    const name = field(form, "name") || file.name.replace(/\.[^.]+$/, "");
+    try {
+      await addMusic(file, name);
+    } catch (cause) {
+      if (cause instanceof VideoError) return render(cause.message, 422);
+      throw cause;
+    }
+    return redirect("/admin/musica");
+  }
+  const match = path.match(/^\/admin\/musica\/([0-9a-f-]{36})(?:\/(apagar))?$/);
+  if (!match) return notFound();
+  if (match[2] && req.method === "POST") {
+    await removeMusic(match[1]!);
+    return redirect("/admin/musica");
+  }
+  const track = !match[2] && req.method === "GET" ? await getMusic(match[1]!) : undefined;
+  if (!track) return notFound();
+  const types: Record<string, string> = { mp3: "audio/mpeg", m4a: "audio/mp4", wav: "audio/wav", ogg: "audio/ogg" };
+  return mediaResponse(req, musicPath(track), types[track.extension] ?? "application/octet-stream");
+}
+
+async function handleEventVideo(req: Request, id: string, action: string): Promise<Response> {
+  const event = await getEventById(id);
+  if (!event) return notFound();
+  if (action === "video.mp4" && req.method === "GET") {
+    const download = new URL(req.url).searchParams.has("descarregar");
+    return mediaResponse(req, videoPath(id), "video/mp4", download ? "video-do-evento.mp4" : undefined);
+  }
+  if (req.method !== "POST") return notFound();
+  if (action === "video/apagar") {
+    if (!(await deleteVideo(id))) return eventDetail(id, "Espera que o vídeo acabe de ser gerado.", 409);
+    return redirect(`/admin/clientes/${id}#video`);
+  }
+  if (action !== "video/gerar") return notFound();
+  const form = await req.formData();
+  const musicId = field(form, "musicId") || null;
+  const maxPhotos = Number(field(form, "maxPhotos"));
+  if (!VIDEO_LENGTHS.includes(maxPhotos as (typeof VIDEO_LENGTHS)[number])) return eventDetail(id, "Escolhe um número de fotografias válido.", 422);
+  if (musicId && !(/^[0-9a-f-]{36}$/.test(musicId) && (await getMusic(musicId)))) return eventDetail(id, "Escolhe uma música válida.", 422);
+  if ((await countVideoPhotos(event.db_name)) === 0) return eventDetail(id, "Este evento ainda não tem fotografias para o vídeo.", 422);
+  if (!(await requestVideo(id, musicId, maxPhotos))) return eventDetail(id, "Este vídeo já está a ser gerado.", 409);
+  return redirect(`/admin/clientes/${id}#video`);
+}
+
 async function handleAdminLogin(req: Request): Promise<Response> {
   if (req.method === "GET") {
     if (await isAuthenticated(req)) return redirect("/admin");
@@ -244,6 +307,7 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     return redirect("/admin/entrar", { "Set-Cookie": sessionCookie(null) });
   }
   if (path === "/admin/definicoes" || path.startsWith("/admin/definicoes/")) return handleSettings(req, path);
+  if (path === "/admin/musica" || path.startsWith("/admin/musica/")) return handleMusic(req, path);
   if (path === "/admin/estatisticas" || path === "/admin/organizadores" || path.startsWith("/admin/organizadores/") || path === "/admin/emails" || path.startsWith("/admin/emails/")) {
     return handleAdminOps(req, path);
   }
@@ -291,6 +355,7 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
   const [, id, action] = match as unknown as [string, string, string | undefined];
 
   if (!action && req.method === "GET") return eventDetail(id);
+  if (action?.startsWith("video")) return handleEventVideo(req, id, action);
 
   if (req.method === "GET" && action && ["qr.svg", "qr.png", "cartoes.pdf", "personalizar"].includes(action)) {
     const event = await getEventById(id);

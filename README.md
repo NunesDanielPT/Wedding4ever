@@ -28,6 +28,7 @@ Já disponível:
 - Modelos de e-mail em `/admin/emails`
 - Avisos em direto, instalação como app e notificações no telemóvel
 - Moderação de fotografias, bloco de notas por evento, dias extra e pacotes de eventos para organizadores
+- Vídeo do evento gerado pelo superadmin, com biblioteca própria de música (requer ffmpeg)
 - Envio manual do link de download aos convidados, com limite de downloads em simultâneo
 - Migrações automáticas em todas as bases
 

@@ -38,6 +38,7 @@ const { migrate } = await import("../src/db/migrate");
 const events = await import("../src/db/events");
 const { ensureFirstAdmin } = await import("../src/lib/auth");
 const { handle } = await import("../src/server");
+const { detectAudio, getEventVideo, listMusic, pickVideoPhotos } = await import("../src/lib/video");
 
 let cookie = "";
 
@@ -1467,4 +1468,76 @@ describe("moderação, notas e extras", () => {
     await post(`/admin/organizadores/${id}/pacote`, { credits: "" });
     expect((await create("Sem limite")).status).toBe(303);
   }, 20_000);
+});
+
+describe("vídeo do evento", () => {
+  const photo = (id: string, mission: string, position: number, votes: number) =>
+    ({ id, mission_id: mission, title: mission, position, guest_name: "A", votes, winner: false });
+
+  test("reparte o limite pelas missões e deixa a mais votada para o fim", () => {
+    const photos = [photo("a1", "a", 1, 5), photo("a2", "a", 1, 3), photo("a3", "a", 1, 1), photo("b1", "b", 2, 2)];
+    expect(pickVideoPhotos(photos, 3).map((item) => item.id)).toEqual(["a2", "a1", "b1"]);
+    expect(pickVideoPhotos(photos, 99).length).toBe(4);
+  });
+
+  test("reconhece os formatos de áudio e recusa o resto", () => {
+    expect(detectAudio(new TextEncoder().encode("ID3xxxxxxxxx"))).toBe("mp3");
+    expect(detectAudio(new TextEncoder().encode("RIFFxxxxWAVE"))).toBe("wav");
+    expect(detectAudio(new TextEncoder().encode("<html></html>"))).toBeUndefined();
+  });
+
+  test("gera o vídeo com música, só para o superadmin, e protege texto hostil", async () => {
+    const event = await createClient({ ...couple, name: "Vídeo %{pts} : 'teste' \\ @/etc/passwd 🎉" });
+    await events.setEventStatus(event.id, "aberto");
+    const db = events.eventDb(event.db_name);
+    const [mission] = await db`SELECT id FROM missions ORDER BY position LIMIT 1`;
+    const base = `/admin/clientes/${event.id}`;
+    expect((await post(`${base}/video/gerar`, { musicId: "", maxPhotos: "20" })).status).toBe(422);
+
+    const guest = cookieOf(await post(`/e/${event.slug}/entrar`, { name: "Ana: %{x}", email: "video@exemplo.pt" }, { Cookie: "" }));
+    const upload = new FormData();
+    upload.set("photo", new File([PNG_1X1], "a.png", { type: "image/png" }));
+    await handle(new Request(`${ORIGIN}/e/${event.slug}/missoes/${mission.id}/fotos`, { method: "POST", body: upload, headers: { Origin: ORIGIN, Cookie: guest } }));
+    for (let i = 0; i < 60 && (await db`SELECT id FROM photos WHERE preview_status = 'ready'`).length === 0; i++) await Bun.sleep(100);
+
+    const wav = new Uint8Array(44 + 16_000);
+    const view = new DataView(wav.buffer);
+    wav.set(new TextEncoder().encode("RIFF"), 0);
+    view.setUint32(4, 36 + 16_000, true);
+    wav.set(new TextEncoder().encode("WAVEfmt "), 8);
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, 8000, true); view.setUint32(28, 8000, true); view.setUint16(32, 1, true); view.setUint16(34, 8, true);
+    wav.set(new TextEncoder().encode("data"), 36);
+    view.setUint32(40, 16_000, true);
+    const music = new FormData();
+    music.set("music", new File([wav], "faixa.wav"));
+    const added = await handle(new Request(`${ORIGIN}/admin/musica`, { method: "POST", body: music, headers: { Origin: ORIGIN, Cookie: cookie } }));
+    expect(added.status).toBe(303);
+    const [track] = await listMusic();
+    expect(track!.duration).toBe(2);
+
+    const fake = new FormData();
+    fake.set("music", new File([new TextEncoder().encode("não é música")], "x.mp3"));
+    expect((await handle(new Request(`${ORIGIN}/admin/musica`, { method: "POST", body: fake, headers: { Origin: ORIGIN, Cookie: cookie } }))).status).toBe(422);
+
+    expect((await post(`${base}/video/gerar`, { musicId: track!.id, maxPhotos: "20" })).status).toBe(303);
+    let video = await getEventVideo(event.id);
+    for (let i = 0; i < 600 && video?.status !== "pronto" && video?.status !== "erro"; i++) {
+      await Bun.sleep(100);
+      video = await getEventVideo(event.id);
+    }
+    expect(video).toMatchObject({ status: "pronto", photos: 1, has_file: true });
+
+    const full = await get(`${base}/video.mp4`);
+    expect(full.headers.get("content-type")).toBe("video/mp4");
+    const partial = await handle(new Request(`${ORIGIN}${base}/video.mp4`, { headers: { Cookie: cookie, Range: "bytes=0-9" } }));
+    expect(partial.status).toBe(206);
+    expect((await partial.arrayBuffer()).byteLength).toBe(10);
+
+    const anonymous = await handle(new Request(`${ORIGIN}${base}/video.mp4`, { headers: { Cookie: "" } }));
+    expect(anonymous.status).not.toBe(200);
+    expect((await post(`/admin/musica/${track!.id}/apagar`, {})).status).toBe(303);
+    expect((await post(`${base}/video/apagar`, {})).status).toBe(303);
+    expect((await get(`${base}/video.mp4`)).status).toBe(404);
+  }, 40_000);
 });

@@ -1,7 +1,7 @@
 FROM oven/bun:1.4-slim
 WORKDIR /app
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends imagemagick libheif1 \
+  && apt-get install -y --no-install-recommends imagemagick libheif1 ffmpeg fonts-dejavu-core \
   && (apt-get install -y --no-install-recommends libheif-plugin-libde265 || true) \
   && rm -rf /var/lib/apt/lists/* \
   && convert -list format | grep -E 'HEIC.*r'
