@@ -6,19 +6,20 @@ export interface Organizer {
   email: string;
   active: boolean;
   events: number;
+  event_credits: number | null;
 }
 
 export async function listOrganizers(): Promise<Organizer[]> {
   return central`
-    SELECT o.id, o.name, o.email, o.active, count(e.id)::int AS events
+    SELECT o.id, o.name, o.email, o.active, o.event_credits, count(e.id)::int AS events
     FROM organizers o LEFT JOIN events e ON e.organizer_id = o.id
     GROUP BY o.id ORDER BY o.name, o.email
   `;
 }
 
-export async function findActiveOrganizer(email: string): Promise<Pick<Organizer, "id" | "name" | "email"> | undefined> {
-  const rows: Pick<Organizer, "id" | "name" | "email">[] = await central`
-    SELECT id, name, email FROM organizers WHERE email = ${email} AND active
+export async function findActiveOrganizer(email: string): Promise<Pick<Organizer, "id" | "name" | "email" | "event_credits"> | undefined> {
+  const rows: Pick<Organizer, "id" | "name" | "email" | "event_credits">[] = await central`
+    SELECT id, name, email, event_credits FROM organizers WHERE email = ${email} AND active
   `;
   return rows[0];
 }
@@ -57,4 +58,23 @@ export async function setOrganizerActive(id: string, active: boolean): Promise<v
 export async function removeOrganizer(id: string): Promise<void> {
   await endSessions(id);
   await central`DELETE FROM organizers WHERE id = ${id}::uuid`;
+}
+
+export async function setOrganizerCredits(id: string, credits: number | null): Promise<void> {
+  await central`UPDATE organizers SET event_credits = ${credits} WHERE id = ${id}::uuid`;
+}
+
+/** Gasta um evento do pacote; sem pacote definido, a conta não tem limite. */
+export async function useOrganizerCredit(id: string): Promise<boolean> {
+  const rows = await central`
+    UPDATE organizers SET event_credits = event_credits - 1
+    WHERE id = ${id}::uuid AND event_credits > 0 RETURNING id
+  `;
+  if (rows.length > 0) return true;
+  const unlimited = await central`SELECT 1 FROM organizers WHERE id = ${id}::uuid AND event_credits IS NULL`;
+  return unlimited.length > 0;
+}
+
+export async function refundOrganizerCredit(id: string): Promise<void> {
+  await central`UPDATE organizers SET event_credits = event_credits + 1 WHERE id = ${id}::uuid AND event_credits IS NOT NULL`;
 }

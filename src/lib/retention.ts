@@ -17,3 +17,8 @@ export function retentionOf(eventDate: string, retentionDays: number, now = new 
   const daysLeft = Math.round((end - toDay(lisbonDate.format(now))) / DAY_MS);
   return { deleteDate: new Date(end).toISOString().slice(0, 10), daysLeft, expired: daysLeft < 0 };
 }
+
+/** Soma ao prazo geral os dias extra vendidos a este evento. */
+export function retentionForEvent(event: { event_date: string; extra_days: number }, retentionDays: number): Retention {
+  return retentionOf(event.event_date, retentionDays + event.extra_days);
+}

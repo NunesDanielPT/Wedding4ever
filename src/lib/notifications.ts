@@ -7,7 +7,7 @@ import { sendMail } from "./mail";
 import { getWinners, listAdminMissions } from "./missions";
 import { getVapidKeys, sendPush, type PushSubscription } from "./push";
 import { formatDate } from "./format";
-import { retentionOf } from "./retention";
+import { retentionForEvent } from "./retention";
 import { getSettings, type EmailNotice } from "./settings";
 
 const CONCURRENCY = 10;
@@ -99,7 +99,7 @@ export async function sendDownloadEmails(event: EventRecord, link: string): Prom
     evento: event.name,
     link,
     dias: String(retentionDays),
-    data_limite: formatDate(retentionOf(event.event_date, retentionDays).deleteDate),
+    data_limite: formatDate(retentionForEvent(event, retentionDays).deleteDate),
     plataforma: brand(),
   };
   const subject = renderTemplate(template.subject, variables);

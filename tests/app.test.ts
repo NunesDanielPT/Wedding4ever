@@ -642,7 +642,7 @@ describe("site público", () => {
     expect(response.headers.get("x-robots-tag")).toBeNull();
     const body = await response.text();
     expect(body).toContain("Até 100 convidados");
-    expect(body).toContain("Sob consulta");
+    expect(body).toContain("59 €");
     expect(body).toContain("Área de cliente");
     expect(body).not.toContain("O que dizem os nossos clientes");
   });
@@ -1394,4 +1394,77 @@ describe("superadmin na área de um evento", () => {
     expect(asClient).toContain("Os meus eventos");
     expect(asClient).not.toContain('href="/admin/organizadores"');
   });
+});
+
+describe("moderação, notas e extras", () => {
+  async function photoEvent() {
+    const event = await createClient({ ...couple, name: "Evento moderação", coupleEmail: "moderacao@exemplo.pt" });
+    await events.setEventStatus(event.id, "aberto");
+    const db = events.eventDb(event.db_name);
+    const [mission] = await db`SELECT id FROM missions ORDER BY position LIMIT 1`;
+    const guest = cookieOf(await post(`/e/${event.slug}/entrar`, { name: "Autor Foto", email: "autor@exemplo.pt" }, { Cookie: "" }));
+    const form = new FormData();
+    form.set("photo", new File([PNG_1X1], "a.png", { type: "image/png" }));
+    await handle(new Request(`${ORIGIN}/e/${event.slug}/missoes/${mission.id}/fotos`, { method: "POST", body: form, headers: { Origin: ORIGIN, Cookie: guest } }));
+    let photo: { id: string } | undefined;
+    for (let i = 0; i < 60 && !photo; i++) {
+      [photo] = await db`SELECT id FROM photos WHERE preview_status = 'ready'`;
+      if (!photo) await Bun.sleep(100);
+    }
+    return { event, mission, guest, photo: photo!, db };
+  }
+
+  test("esconde e apaga fotografias, sem dar esse poder ao cliente", async () => {
+    const { event, mission, photo, db } = await photoEvent();
+    const base = `/cliente/eventos/${event.id}`;
+    const code = (await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text()).match(/<strong>([A-Z2-9]{10})</)![1]!;
+    const client = cookieOf(await post("/entrar", { email: "moderacao@exemplo.pt", code }, { Cookie: "" }));
+    expect((await post(`${base}/fotos/${photo.id}/esconder`, {}, { Cookie: client })).status).toBe(404);
+
+    expect((await post(`${base}/fotos/${photo.id}/esconder`, {})).status).toBe(303);
+    await setMissionPhase(event.db_name, mission.id, "votacao");
+    const other = cookieOf(await post(`/e/${event.slug}/entrar`, { name: "Outra Pessoa", email: "outra@exemplo.pt" }, { Cookie: "" }));
+    const as = (path: string, cookie: string) => handle(new Request(`${ORIGIN}${path}`, { headers: { Cookie: cookie } }));
+    expect((await as(`/e/${event.slug}/fotos/${photo.id}/preview`, other)).status).toBe(404);
+    expect(await (await get(`${base}/galeria?missao=${mission.id}`)).text()).toContain("Escondida");
+    expect(await (await as(`${base}/galeria?missao=${mission.id}`, client)).text()).not.toContain("/thumb");
+
+    expect((await post(`${base}/fotos/${photo.id}/mostrar`, {})).status).toBe(303);
+    expect((await as(`/e/${event.slug}/fotos/${photo.id}/preview`, other)).status).toBe(200);
+    expect((await post(`${base}/fotos/${photo.id}/apagar`, {})).status).toBe(303);
+    expect((await db`SELECT id FROM photos`).length).toBe(0);
+  });
+
+  test("as notas ficam fora do alcance do cliente e mostram o pagamento", async () => {
+    const event = await createClient({ ...couple, name: "Evento notas", coupleEmail: "notas@exemplo.pt" });
+    const base = `/cliente/eventos/${event.id}`;
+    const code = (await (await post(`/admin/clientes/${event.id}/codigo-noivos`, {})).text()).match(/<strong>([A-Z2-9]{10})</)![1]!;
+    const client = cookieOf(await post("/entrar", { email: "notas@exemplo.pt", code }, { Cookie: "" }));
+    const notes = { contact_name: "Ana", contact_phone: "910000000", contact_email: "ana@exemplo.pt", payment_status: "sinal_pago", amount: "89 €", notes: "Pediu cartões azuis" };
+    expect((await post(`${base}/notas`, { ...notes, payment_status: "x" })).status).toBe(422);
+    expect((await post(`${base}/notas`, notes)).status).toBe(303);
+    expect(await (await get(`${base}/notas`)).text()).toContain("Pediu cartões azuis");
+    expect((await handle(new Request(`${ORIGIN}${base}/notas`, { headers: { Cookie: client } }))).status).toBe(404);
+    expect((await post(`${base}/notas`, notes, { Cookie: client })).status).toBe(404);
+    expect(await (await get("/admin")).text()).toContain("Sinal pago");
+  });
+
+  test("os dias extra prolongam o prazo e os pacotes limitam organizadores", async () => {
+    const past = new Date(Date.now() - 40 * 86_400_000).toISOString().slice(0, 10);
+    const event = await createClient({ ...couple, name: "Evento prolongado", eventDate: past });
+    expect((await get(`/e/${event.slug}`, false)).status).toBe(410);
+    expect((await post(`/admin/clientes/${event.id}/dias-extra`, { extraDays: "30" })).status).toBe(303);
+    expect((await get(`/e/${event.slug}`, false)).status).toBe(200);
+
+    await post("/admin/organizadores", { name: "Pack Foto", email: "pack@exemplo.pt", password: "palavra-passe-longa" });
+    const row = (await (await get("/admin/organizadores")).text()).split("<li>").find((item) => item.includes("pack@exemplo.pt"))!;
+    const id = row.match(/organizadores\/([0-9a-f-]{36})/)![1]!;
+    await post(`/admin/organizadores/${id}/pacote`, { credits: "1" });
+    const session = cookieOf(await post("/entrar", { email: "pack@exemplo.pt", code: "palavra-passe-longa" }, { Cookie: "" }));
+    const create = (name: string) => post("/cliente/eventos/novo", { ...couple, name }, { Cookie: session });
+    expect((await create("Primeiro do pacote")).status).toBe(303);
+    expect((await create("Segundo do pacote")).status).toBe(409);
+    await post(`/admin/organizadores/${id}/pacote`, { credits: "" });
+    expect((await create("Sem limite")).status).toBe(303);
+  }, 20_000);
 });

@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { config } from "../config";
 import { resolveDesign, type Design } from "../lib/design";
+import type { PaymentStatus } from "../lib/event-notes";
 import { EVENT_TYPES, type EventType } from "../lib/event-types";
 import { central } from "./central";
 import { migrate } from "./migrate";
@@ -30,6 +31,8 @@ export interface EventRecord {
   guest_limit: number | null;
   updated_at: string;
   album_token: string | null;
+  extra_days: number;
+  payment_status: PaymentStatus | null;
 }
 
 export interface NewEvent {
@@ -47,7 +50,8 @@ export interface NewEvent {
 const SELECT_EVENT = central`
   id, slug, name, event_type, organizer_id, event_date::text AS event_date, venue,
   couple_email, status, db_name, schema_version, migration_error, design,
-  couple_code_hash IS NOT NULL AS has_couple_code, pack_name, guest_limit, updated_at, album_token
+  couple_code_hash IS NOT NULL AS has_couple_code, pack_name, guest_limit, updated_at, album_token, extra_days,
+  (SELECT payment_status FROM event_notes n WHERE n.event_id = events.id) AS payment_status
 `;
 const DB_NAME = /^evt_[0-9a-f]{16}$/;
 const SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
@@ -197,6 +201,10 @@ export async function setEventPack(id: string, packName: string, guestLimit: num
   await central`
     UPDATE events SET pack_name = ${packName}, guest_limit = ${guestLimit}, updated_at = now() WHERE id = ${id}::uuid
   `;
+}
+
+export async function setExtraDays(id: string, days: number): Promise<void> {
+  await central`UPDATE events SET extra_days = ${days}, updated_at = now() WHERE id = ${id}::uuid`;
 }
 
 export async function setAlbumToken(id: string, token: string | null): Promise<void> {

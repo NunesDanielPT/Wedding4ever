@@ -93,8 +93,8 @@ const PACK_FEATURES = [
   "Download do álbum em ZIP",
 ].join("\n");
 
-const pack = (id: string, name: string, guests: string, maxGuests: string): SiteItem => ({
-  id, name, guests, maxGuests, price: "", features: PACK_FEATURES, highlight: "",
+const pack = (id: string, name: string, guests: string, maxGuests: string, price: string): SiteItem => ({
+  id, name, guests, maxGuests, price, features: PACK_FEATURES, highlight: "",
 });
 
 export interface Site {
@@ -134,10 +134,10 @@ const DEFAULT_SITE: Site = {
   testimonials: [],
   ads: [],
   packs: [
-    pack("p1", "Essencial", "Até 100 convidados", "100"),
-    pack("p2", "Clássico", "Até 150 convidados", "150"),
-    pack("p3", "Grande festa", "Até 200 convidados", "200"),
-    pack("p4", "Sem limites", "300 ou mais convidados", ""),
+    pack("p1", "Essencial", "Até 100 convidados", "100", "59 €"),
+    pack("p2", "Clássico", "Até 150 convidados", "150", "89 €"),
+    pack("p3", "Grande festa", "Até 200 convidados", "200", "119 €"),
+    pack("p4", "Sem limites", "300 ou mais convidados", "", "169 €"),
   ],
 };
 
@@ -171,6 +171,7 @@ export async function getSite(): Promise<Site> {
   const packs = site.packs.map((item) => ({
     ...item,
     maxGuests: item.maxGuests ?? DEFAULT_SITE.packs.find((base) => base.id === item.id)?.maxGuests ?? "",
+    price: item.price || (DEFAULT_SITE.packs.find((base) => base.id === item.id)?.price ?? ""),
   }));
   return { ...site, packs };
 }

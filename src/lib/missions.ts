@@ -151,11 +151,11 @@ export async function listAlbumMissions(dbName: string): Promise<AlbumMission[]>
 
 export interface AlbumPage {
   mission: { id: string; title: string };
-  photos: Pick<AlbumPhoto, "id" | "guest_name" | "caption" | "preview_status" | "extension">[];
+  photos: (Pick<AlbumPhoto, "id" | "guest_name" | "caption" | "preview_status" | "extension"> & { hidden: boolean })[];
   total: number;
 }
 
-export async function getAlbumPage(dbName: string, missionId: string, page: number, size: number, search: string): Promise<AlbumPage | undefined> {
+export async function getAlbumPage(dbName: string, missionId: string, page: number, size: number, search: string, includeHidden = false): Promise<AlbumPage | undefined> {
   const db = eventDb(dbName);
   const missions: { id: string; title: string }[] = await db`SELECT id, title FROM missions WHERE id = ${missionId}::uuid`;
   const mission = missions[0];
@@ -163,18 +163,37 @@ export async function getAlbumPage(dbName: string, missionId: string, page: numb
   const like = `%${search.replace(/[\\%_]/g, "\\$&")}%`;
   const [count]: { total: number }[] = await db`
     SELECT count(*)::int AS total FROM photos p JOIN guests g ON g.id = p.guest_id
-    WHERE p.mission_id = ${missionId}::uuid AND NOT p.hidden AND g.full_name ILIKE ${like}
+    WHERE p.mission_id = ${missionId}::uuid AND (${includeHidden} OR NOT p.hidden) AND g.full_name ILIKE ${like}
   `;
   const photos: AlbumPage["photos"] = await db`
-    SELECT p.id, g.full_name AS guest_name, p.caption, p.preview_status, p.extension
+    SELECT p.id, g.full_name AS guest_name, p.caption, p.preview_status, p.extension, p.hidden
     FROM photos p JOIN guests g ON g.id = p.guest_id
-    WHERE p.mission_id = ${missionId}::uuid AND NOT p.hidden AND g.full_name ILIKE ${like}
+    WHERE p.mission_id = ${missionId}::uuid AND (${includeHidden} OR NOT p.hidden) AND g.full_name ILIKE ${like}
     ORDER BY p.created_at, p.id LIMIT ${size} OFFSET ${(page - 1) * size}
   `;
   return { mission, photos, total: count!.total };
 }
 
-export async function isAlbumPhoto(dbName: string, photoId: string): Promise<boolean> {
-  const rows = await eventDb(dbName)`SELECT 1 FROM photos WHERE id = ${photoId}::uuid AND NOT hidden AND preview_status = 'ready'`;
+export async function isAlbumPhoto(dbName: string, photoId: string, includeHidden = false): Promise<boolean> {
+  const rows = await eventDb(dbName)`
+    SELECT 1 FROM photos WHERE id = ${photoId}::uuid AND (${includeHidden} OR NOT hidden) AND preview_status = 'ready'
+  `;
   return rows.length > 0;
+}
+
+export async function setPhotoHidden(dbName: string, photoId: string, hidden: boolean): Promise<string | undefined> {
+  const rows: { mission_id: string }[] = await eventDb(dbName)`
+    UPDATE photos SET hidden = ${hidden} WHERE id = ${photoId}::uuid RETURNING mission_id
+  `;
+  return rows[0]?.mission_id;
+}
+
+export async function deletePhotoAsManager(event: EventRecord, photoId: string): Promise<string | undefined> {
+  const rows: { mission_id: string; extension: string }[] = await eventDb(event.db_name)`
+    DELETE FROM photos WHERE id = ${photoId}::uuid RETURNING mission_id, extension
+  `;
+  const row = rows[0];
+  if (!row) return undefined;
+  await removePhotoFiles(event.id, photoId, row.extension);
+  return row.mission_id;
 }

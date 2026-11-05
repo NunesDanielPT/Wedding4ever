@@ -3,7 +3,7 @@ import { DEFAULT_TEMPLATES, getTemplates, renderTemplate, saveTemplate, type Tem
 import { sampleVariables } from "../lib/event-emails";
 import { sendMail } from "../lib/mail";
 import { getSettings } from "../lib/settings";
-import { addOrganizer, listOrganizers, removeOrganizer, setOrganizerActive, setOrganizerPassword } from "../lib/organizers";
+import { addOrganizer, listOrganizers, removeOrganizer, setOrganizerActive, setOrganizerCredits, setOrganizerPassword } from "../lib/organizers";
 import { getStats } from "../lib/stats";
 import { emailsPage, organizerPage, organizersPage, statsPage, type EmailsNotice } from "../views/admin-ops";
 import { listEvents } from "../db/events";
@@ -35,9 +35,15 @@ async function handleOrganizers(req: Request, path: string): Promise<Response> {
     const events = (await listEvents()).filter((event) => event.organizer_id === organizer.id);
     return htmlResponse(organizerPage(organizer, events, (await getSettings()).retentionDays));
   }
-  const match = path.match(/^\/admin\/organizadores\/([0-9a-f-]{36})\/(palavra-passe|ativar|desativar|apagar)$/);
+  const match = path.match(/^\/admin\/organizadores\/([0-9a-f-]{36})\/(palavra-passe|ativar|desativar|apagar|pacote)$/);
   if (!match || req.method !== "POST") return notFound();
   const [, id, operation] = match as unknown as [string, string, string];
+  if (operation === "pacote") {
+    const value = field(await req.formData(), "credits");
+    if (value && !/^\d{1,4}$/.test(value)) return render("O pacote tem de ser um número inteiro.", 422);
+    await setOrganizerCredits(id, value ? Number(value) : null);
+    return redirect("/admin/organizadores");
+  }
   if (operation === "palavra-passe") {
     const password = String((await req.formData()).get("password") ?? "");
     if (password.length < MIN_ADMIN_PASSWORD) return render("A palavra-passe tem de ter pelo menos 12 caracteres.", 422);

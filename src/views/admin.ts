@@ -4,10 +4,11 @@ import { EVENT_STATUSES, eventDesign, type EventRecord, type EventStats, type Ev
 import type { Admin } from "../lib/auth";
 import type { Design } from "../lib/design";
 import { eventUrl } from "../lib/event-assets";
+import { PAYMENT_LABELS } from "../lib/event-notes";
 import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
 import { AUDIENCE_LABELS } from "../lib/email-templates";
-import { retentionOf } from "../lib/retention";
+import { retentionForEvent } from "../lib/retention";
 import type { EmailLogRow } from "../lib/event-emails";
 import type { SiteItem } from "../lib/site";
 import { MAX_TITLE_LENGTH, MISSION_PHASES, PHASE_LABELS, type AdminMission } from "../lib/missions";
@@ -65,7 +66,7 @@ export function loginPage(error?: string): string {
 }
 
 function retentionLabel(event: EventRecord, days: number): string {
-  const { daysLeft, expired } = retentionOf(event.event_date, days);
+  const { daysLeft, expired } = retentionForEvent(event, days);
   if (expired) return `Apagar: prazo terminou há ${-daysLeft} ${daysLeft === -1 ? "dia" : "dias"}`;
   return daysLeft === 0 ? "Último dia antes de apagar" : `Faltam ${daysLeft} ${daysLeft === 1 ? "dia" : "dias"} para apagar`;
 }
@@ -77,9 +78,10 @@ export function eventRows(events: EventRecord[], retentionDays: number, organize
         <a href="/admin/clientes/${event.id}">
           <span class="client-name">${event.name}
             ${event.organizer_id && html`<span class="organizer-tag">${organizerNames.get(event.organizer_id) ?? "Organizador"}</span>`}
+            ${event.payment_status && html`<span class="payment-tag payment-${event.payment_status}">${PAYMENT_LABELS[event.payment_status]}</span>`}
           </span>
           <span class="client-date">${EVENT_TYPES[event.event_type].label}, ${formatDate(event.event_date)}<br>
-            <span class="${retentionOf(event.event_date, retentionDays).expired ? "retention-late" : ""}">${retentionLabel(event, retentionDays)}</span></span>
+            <span class="${retentionForEvent(event, retentionDays).expired ? "retention-late" : ""}">${retentionLabel(event, retentionDays)}</span></span>
           <span class="status status-${event.status}">${STATUS_LABELS[event.status]}</span>
         </a>
       </li>`)}
@@ -98,7 +100,7 @@ export function dashboardPage(
   organizers: OrganizerRef[],
   view: "admin" | "organizadores",
 ): string {
-  const expired = events.filter((event) => retentionOf(event.event_date, retentionDays).expired).length;
+  const expired = events.filter((event) => retentionForEvent(event, retentionDays).expired).length;
   const names = new Map(organizers.map((organizer) => [organizer.id, organizer.name]));
   const own = events.filter((event) => !event.organizer_id);
   const external = events.filter((event) => event.organizer_id);
@@ -209,7 +211,7 @@ export function eventPage(
   emailReady = false,
 ): string {
   const url = eventUrl(event);
-  const retention = retentionOf(event.event_date, retentionDays);
+  const retention = retentionForEvent(event, retentionDays);
   return shell(event.name, html`
     <a class="back" href="/admin">Voltar aos eventos</a>
     ${error && html`<p class="error" role="alert">${error}</p>`}
@@ -220,6 +222,7 @@ export function eventPage(
       <a class="action" href="/cliente/eventos/${event.id}">Área do cliente</a>
       <a class="action" href="/cliente/eventos/${event.id}/galeria">Galeria</a>
       <a class="action" href="/cliente/eventos/${event.id}/vencedores">Vencedores</a>
+      <a class="action" href="/cliente/eventos/${event.id}/notas">Bloco de notas</a>
     </nav>
     <div class="event-layout">
       <section class="place-card" aria-label="Cartão de mesa">
@@ -247,6 +250,14 @@ export function eventPage(
           ${retention.expired
             ? html`<p class="error" role="status">O prazo terminou em ${formatDate(retention.deleteDate)}, há ${-retention.daysLeft} ${retention.daysLeft === -1 ? "dia" : "dias"}. Clientes e organizadores já não têm acesso. Quando quiseres, apaga o evento no fim desta página.</p>`
             : html`<p>${retentionLabel(event, retentionDays)}. Disponível até ${formatDate(retention.deleteDate)}. O evento nunca é apagado sozinho.</p>`}
+        </section>
+
+        <section>
+          <h2>Dias extra de acesso</h2>
+          <form method="post" action="/admin/clientes/${event.id}/dias-extra" class="inline-form">
+            <input type="number" name="extraDays" min="0" max="3650" value="${event.extra_days}" aria-label="Dias extra de acesso">
+            <button>Guardar dias</button>
+          </form>
         </section>
 
         <section>

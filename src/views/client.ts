@@ -6,8 +6,9 @@ import { formatDate } from "../lib/format";
 import { html, Html } from "../lib/html";
 import { PHASE_LABELS, type AdminMission, type AlbumMission, type AlbumPage, type MissionPhase } from "../lib/missions";
 import { EVENT_TYPES } from "../lib/event-types";
-import { retentionOf } from "../lib/retention";
+import { retentionForEvent } from "../lib/retention";
 import { isAdminViewer } from "../lib/viewer";
+import { PAYMENT_LABELS, type EventNotes } from "../lib/event-notes";
 import { type DesignContext, shell, STATUS_LABELS } from "./admin";
 import { appShell } from "./app-shell";
 import { guestTable } from "./guests";
@@ -83,7 +84,7 @@ export function clientLoginPage(error?: string, changed = false): string {
 }
 
 function availability(event: EventRecord, retentionDays: number): string {
-  const { deleteDate, daysLeft, expired } = retentionOf(event.event_date, retentionDays);
+  const { deleteDate, daysLeft, expired } = retentionForEvent(event, retentionDays);
   if (expired) return "Prazo terminado";
   return `Disponível até ${formatDate(deleteDate)}, ${daysLeft === 1 ? "falta 1 dia" : `faltam ${daysLeft} dias`}`;
 }
@@ -96,12 +97,13 @@ export function clientExpiredPage(event: EventRecord, deleteDate: string): strin
   `);
 }
 
-export function clientEventsPage(events: EventRecord[], canCreate = false, retentionDays = 30): string {
+export function clientEventsPage(events: EventRecord[], canCreate = false, retentionDays = 30, credits?: number | null): string {
   return clientShell("Os meus eventos", html`
     <div class="page-head">
       <h1>Os meus eventos</h1>
       ${canCreate && html`<a class="primary" href="/cliente/eventos/novo">Criar evento</a>`}
     </div>
+    ${canCreate && credits !== null && credits !== undefined && html`<p class="notice" role="status">${credits === 1 ? "Tens 1 evento disponível no teu pacote." : `Tens ${credits} eventos disponíveis no teu pacote.`}</p>`}
     ${events.length === 0
       ? html`<div class="empty"><p>Ainda não há eventos nesta conta.</p></div>`
       : html`<ul class="client-list event-list">
@@ -172,7 +174,7 @@ export function clientEventPage(
 
     <section id="missoes" class="client-section">
       <h2>Gestão das missões</h2>
-      ${manage && html`<p><a class="action" href="${base}/missoes">Editar missões, sugestões e fotografias por missão</a></p>`}
+      ${manage && html`<p class="event-actions"><a class="action" href="${base}/missoes">Editar missões</a><a class="action" href="${base}/notas">Bloco de notas</a></p>`}
       ${missions.length === 0
         ? html`<p>Este evento ainda não tem missões.</p>`
         : html`<ul class="client-missions">${missions.map((mission) => missionControls(event, mission))}</ul>`}
@@ -239,7 +241,35 @@ export function clientGalleryIndex(event: EventRecord, missions: AlbumMission[])
   `);
 }
 
-export function clientGalleryPage(event: EventRecord, album: AlbumPage, pageNumber: number, pageSize: number, search: string): string {
+export function notesPage(event: EventRecord, notes: EventNotes, error?: string, saved = false): string {
+  const base = `/cliente/eventos/${event.id}`;
+  return clientShell(`Notas de ${event.name}`, html`
+    <a class="back" href="${isAdminViewer() ? `/admin/clientes/${event.id}` : base}">Voltar a ${event.name}</a>
+    <h1>Bloco de notas</h1>
+    <p class="lead">Só o superadmin e o organizador do evento veem esta página. O cliente não tem acesso.</p>
+    ${error && html`<p class="error" role="alert">${error}</p>`}
+    ${saved && html`<p class="notice" role="status">Notas guardadas.</p>`}
+    <form method="post" action="${base}/notas" class="stack narrow notes-form">
+      <div class="pair">
+        <label>Nome de contacto<input name="contact_name" maxlength="120" value="${notes.contact_name}"></label>
+        <label>Telefone<input type="tel" name="contact_phone" maxlength="120" value="${notes.contact_phone}"></label>
+      </div>
+      <label>E-mail de contacto<input type="email" name="contact_email" maxlength="160" value="${notes.contact_email}"></label>
+      <div class="pair">
+        <label>Pagamento
+          <select name="payment_status">
+            ${Object.entries(PAYMENT_LABELS).map(([value, label]) => html`<option value="${value}" ${value === notes.payment_status ? new Html("selected") : ""}>${label}</option>`)}
+          </select>
+        </label>
+        <label>Valor<input name="amount" maxlength="120" placeholder="Por exemplo, 89 €" value="${notes.amount}"></label>
+      </div>
+      <label>Anotações<textarea name="notes" rows="12" maxlength="20000" placeholder="O que o cliente pediu, o que ficou combinado, próximos passos.">${notes.notes}</textarea></label>
+      <button class="primary">Guardar notas</button>
+    </form>
+  `);
+}
+
+export function clientGalleryPage(event: EventRecord, album: AlbumPage, pageNumber: number, pageSize: number, search: string, manage = false): string {
   const base = `/cliente/eventos/${event.id}`;
   const ready = album.photos.filter((photo) => photo.preview_status === "ready");
   const pages = Math.max(1, Math.ceil(album.total / pageSize));
@@ -265,7 +295,13 @@ export function clientGalleryPage(event: EventRecord, album: AlbumPage, pageNumb
               <a href="${base}/fotos/${photo.id}/preview" data-open="${index}">
                 <img src="${base}/fotos/${photo.id}/thumb" alt="${photo.caption || `Fotografia de ${photo.guest_name}`}" width="480" height="480" loading="lazy">
               </a>
-              <p class="photo-author">${photo.guest_name}</p>
+              <p class="photo-author">${photo.guest_name}${photo.hidden && html` <span class="hidden-tag">Escondida</span>`}</p>
+              ${manage && html`<div class="moderation">
+                <form method="post" action="${base}/fotos/${photo.id}/${photo.hidden ? "mostrar" : "esconder"}?pagina=${pageNumber}"><button class="link-button">${photo.hidden ? "Mostrar" : "Esconder"}</button></form>
+                <details><summary>Apagar</summary>
+                  <form method="post" action="${base}/fotos/${photo.id}/apagar?pagina=${pageNumber}"><button class="link-button link-danger">Confirmar apagar</button></form>
+                </details>
+              </div>`}
             </li>`)}
         </ul>`}
     ${pages > 1 && html`<nav class="pagination" aria-label="Páginas">

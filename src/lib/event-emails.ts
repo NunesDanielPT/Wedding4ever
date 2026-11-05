@@ -8,7 +8,7 @@ import { EVENT_TYPES } from "./event-types";
 import { AUDIENCES, getTemplates, renderTemplate, type Audience, type TemplateKey } from "./email-templates";
 import { formatDate } from "./format";
 import { sendMail } from "./mail";
-import { retentionOf } from "./retention";
+import { retentionForEvent } from "./retention";
 import { getSettings } from "./settings";
 
 export interface EmailLogRow {
@@ -62,7 +62,7 @@ async function eventVariables(event: EventRecord, retentionDays: number, organiz
     codigo: code,
     organizador: organizerName,
     dias: String(retentionDays),
-    data_limite: formatDate(retentionOf(event.event_date, retentionDays).deleteDate),
+    data_limite: formatDate(retentionForEvent(event, retentionDays).deleteDate),
     plataforma: brand(),
   };
 }

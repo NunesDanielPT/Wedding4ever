@@ -13,6 +13,7 @@ import {
   applyEventStatus,
   setAlbumToken,
   setEventPack,
+  setExtraDays,
   type EventRecord,
   type EventStatus,
 } from "./db/events";
@@ -52,7 +53,7 @@ import { queueNotifications, sendDownloadEmails } from "./lib/notifications";
 import { archiveEvent } from "./lib/stats";
 import * as admin from "./views/admin";
 
-const VERSION = "2026-11-04-menu";
+const VERSION = "2026-11-05-comercial";
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const STATIC_FILES: Record<string, string> = {
   "/static/style.css": "style.css",
@@ -342,6 +343,14 @@ async function handleAdmin(req: Request, path: string): Promise<Response> {
     void sendDownloadEmails(event, `${eventUrl(event)}/album/${token}`).catch((cause) => {
       console.error(`Falha nos e-mails de download de ${id}`, cause);
     });
+    return redirect(`/admin/clientes/${id}`);
+  }
+
+  if (action === "dias-extra" && req.method === "POST") {
+    const days = Number(field(await req.formData(), "extraDays"));
+    if (!Number.isInteger(days) || days < 0 || days > 3650) return eventDetail(id, "Indica um número de dias válido.", 422);
+    if (!(await getEventById(id))) return notFound();
+    await setExtraDays(id, days);
     return redirect(`/admin/clientes/${id}`);
   }
 

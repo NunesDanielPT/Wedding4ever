@@ -13,6 +13,10 @@ function organizerRow(organizer: Organizer): Html {
     <li>
       <p class="admin-email"><strong><a href="${base}">${organizer.name}</a></strong> ${organizer.email}<br>
         <a href="${base}">${organizer.events} ${organizer.events === 1 ? "evento" : "eventos"}</a>, ${organizer.active ? "conta ativa" : "conta desativada"}</p>
+      <form method="post" action="${base}/pacote" class="inline-form credits-form">
+        <input type="number" name="credits" min="0" value="${organizer.event_credits ?? ""}" placeholder="Sem limite" aria-label="Eventos disponíveis para ${organizer.name}">
+        <button>Guardar eventos disponíveis</button>
+      </form>
       <form method="post" action="${base}/palavra-passe" class="inline-form">
         <input type="password" name="password" autocomplete="new-password" minlength="12" required placeholder="Nova palavra-passe" aria-label="Nova palavra-passe de ${organizer.name}">
         <button>Mudar</button>

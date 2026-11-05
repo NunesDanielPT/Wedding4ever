@@ -8,7 +8,7 @@ import { brand } from "../lib/brand";
 import { getWinners, listAdminMissions } from "../lib/missions";
 import { removeSubscription, saveSubscription } from "../lib/notifications";
 import { getVapidKeys, isAllowedEndpoint } from "../lib/push";
-import { retentionOf } from "../lib/retention";
+import { retentionForEvent } from "../lib/retention";
 import { getSettings } from "../lib/settings";
 import {
   canViewPhoto,
@@ -163,7 +163,7 @@ export async function handleEvent(req: Request, path: string): Promise<Response 
   const isAsset = action === "tema.css" || action === "manifest.webmanifest" || action.startsWith("media/");
   if (!isAsset && !action.startsWith("noivos")) {
     const { retentionDays } = await getSettings();
-    if (retentionOf(event.event_date, retentionDays).expired) return htmlResponse(eventExpiredPage(event), 410);
+    if (retentionForEvent(event, retentionDays).expired) return htmlResponse(eventExpiredPage(event), 410);
   }
 
   if (!action && req.method === "GET") return guestHome(req, event);
