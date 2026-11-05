@@ -13,7 +13,10 @@ MO="scale=3840:2160:flags=bicubic,zoompan=z='1+0.14*on/119':x='(iw-iw/zoom)/2':y
 for i in 0 1; do T motion$i ffmpeg -v error -y -i s$i.jpg -vf "$MO" -frames:v 120 -c:v libx264 -preset ultrafast -crf 12 -g 1 -threads 2 m$i.mp4; done
 X="-c:v libx264 -preset veryfast -crf 21 -bf 0 -pix_fmt yuv420p -threads 2"
 T hold ffmpeg -v error -y -i m0.mp4 -vf "trim=start_frame=20:end_frame=100,setpts=PTS-STARTPTS" $X hold0.mp4
-for t in fade dissolve fadeblack smoothleft smoothright slideup circleopen radial; do T xf-$t ffmpeg -v error -y -i m0.mp4 -i m1.mp4 -filter_complex "[0:v]trim=start_frame=100:end_frame=120,setpts=PTS-STARTPTS[a];[1:v]trim=end_frame=20,setpts=PTS-STARTPTS[b];[a][b]xfade=transition=$t:duration=0.8:offset=0" -frames:v 20 $X fade0.mp4; done
+N='fps=25,settb=1/25,format=yuv420p,setpts=N'
+echo --- full; ffmpeg -v error -y -i m0.mp4 -i m1.mp4 -filter_complex "[0:v]trim=start_frame=100:end_frame=120,setpts=PTS-STARTPTS[a];[1:v]trim=end_frame=20,setpts=PTS-STARTPTS[b];[a][b]xfade=transition=fade:duration=0.8:offset=0" -frames:v 20 $X fade0.mp4 2>&1 | head -5
+echo --- probe; ffprobe -v error -show_entries stream=r_frame_rate,avg_frame_rate,time_base,nb_frames,duration -of compact m0.mp4
+for t in fade dissolve fadeblack smoothleft smoothright slideup circleopen radial; do T xf-$t ffmpeg -v error -y -i m0.mp4 -i m1.mp4 -filter_complex "[0:v]trim=start_frame=100:end_frame=120,setpts=PTS-STARTPTS,fps=25,settb=1/25[a];[1:v]trim=end_frame=20,setpts=PTS-STARTPTS,fps=25,settb=1/25[b];[a][b]xfade=transition=$t:duration=0.8:offset=0" -frames:v 20 $X fade0.mp4; ffprobe -v error -count_frames -select_streams v -show_entries stream=nb_read_frames -of csv=p=0 fade0.mp4; done
 ffmpeg -v error -y -f lavfi -i "sine=frequency=330:duration=5" a.mp3
 printf 'file hold0.mp4\nfile fade0.mp4\nfile hold0.mp4\n' > l.txt
 T final ffmpeg -v error -y -f concat -safe 0 -i l.txt -stream_loop -1 -i a.mp3 -af afade=t=out:st=4:d=3 -c:a aac -b:a 192k -t 7 -c:v copy -movflags +faststart final.mp4
